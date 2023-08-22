@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="proxy2-transmit.cpp">
+    <ClCompile Include="proxy2-transmit.c">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
