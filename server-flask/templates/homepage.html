@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>{{count}} File Upload and Download</h2>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file">
+        <input type="submit" value="Upload">
+    </form>
+    <br>
+    <p>{{ upload_result }}</p>
+    <a href="/download">Download Default File</a>
+    <form action="/download" method="POST">
+        <select name="selected_file">
+            {% for file in uploaded_files %}
+            <option value="{{ file }}">{{ file }}</option>
+            {% endfor %}
+        </select>
+        <input type="submit" value="Download">
+    </form>
+</body>
+</html>
