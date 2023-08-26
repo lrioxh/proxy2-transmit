@@ -14,7 +14,7 @@
 
 //const int BUFSZ = 100;
 #define BACKLOG                 (5)	//最大监听数
-#define BUFSZ                   (409600)
+#define BUFSZ                   (102400)
 
 
 int main()
@@ -69,7 +69,7 @@ int main()
         //c2s(midSrvConn, midClntSocket, transBuf);
         //s2c(midSrvConn, midClntSocket, transBuf);
 
-        ////第二次握手，通过accept来接受对方的套接字的信息
+        ////阻塞 第二次握手，通过accept来接受对方的套接字的信息
         midSrvConn = accept(midSrvSocket, (struct sockaddr*)&clntAddr, &socklen);
         if (midSrvConn == SOCKET_ERROR) {
             printf("Accept failed:%d\n", WSAGetLastError());
@@ -122,7 +122,8 @@ int main()
         //    send(midSrvConn, transBuf, recvLen, 0);
         //}
         //from client
-        //while(1){
+        while(1){
+            memset(transBuf, 0, BUFSZ);
         recvLen = recv(midSrvConn, transBuf, BUFSZ, 0);
         if (recvLen > 0) {
             printf("from clent: (%d)%s\n", recvLen, transBuf);
@@ -143,7 +144,7 @@ int main()
             break;
         }
         //waiting for server
-        Sleep(50);
+        Sleep(10);
         //from server
         recvLen = recv(midClntSocket, transBuf, BUFSZ, 0);
         if (recvLen > 0) {
@@ -170,7 +171,7 @@ int main()
         closesocket(midClntSocket);//关闭
 
 
-    //}
+    }
     //closesocket(midSrvConn);//关闭
     closesocket(midSrvSocket);
     //closesocket(midClntSocket);
