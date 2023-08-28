@@ -1,10 +1,10 @@
 ﻿
-//TODO:0.文件传输
+//TODO:0.文件传输 √
 // 1.函数包装？ 合法值验证
-// 2.return同时close √
-// 3.等待服务器阻塞
-// 4.多线程？
-// 5.每次建立新socket？√
+// 2.多线程？epoll
+// 3.上传（c2s）循环阻塞在recv无法退出 链接设置非阻塞模式√
+// 4.openssl
+// 
 //#include <unistd.h>
 #include <stdio.h>
 //#include <iostream>
@@ -31,10 +31,15 @@ int main()
     int recvLen = 0;
     int iSend = 0;
     //char transBuf[BUFSZ] = { 0 };
+    char* transBuf;
+    transBuf = (char*)malloc(BUFSZ*sizeof(char));
     char ipBuf[16] = { 0 };
     UINT sPORT = 4321;
     UINT cPORT = 4322;
     //char sIP[] = "127.0.0.1";
+
+    unsigned long nonBlockingMode = 1;
+    unsigned long blockingMode = 0;
 
 
 
@@ -48,26 +53,30 @@ int main()
         //socke 返回类型SOCKETuint64 与printf接受int矛盾
     }
     if (midSrvSocket == SOCKET_ERROR) {
-        printf("server socket error: %d\n", WSAGetLastError());
+        printf("Socket error: %d\n", WSAGetLastError());
+        free(transBuf);
+        closesocket(midSrvSocket);
         return -1;
     }
     else {
-        printf("server socket seccess: %d\n", midSrvSocket);
+        printf("Socket seccess: %d\n", midSrvSocket);
     }
     //绑定
     if (bind(midSrvSocket, (struct sockaddr*)&midSrvAddr, socklen) == SOCKET_ERROR) {
         printf("Failed bind:%d\n", WSAGetLastError());
+        free(transBuf);
+        closesocket(midSrvSocket);
         return -1;
     }
     if (listen(midSrvSocket, BACKLOG) == SOCKET_ERROR) {
         printf("Listen failed:%d\n", WSAGetLastError());
+        free(transBuf);
+        closesocket(midSrvSocket);
         return -1;
     }
 
     while (1)
     {
-        //c2s(midSrvConn, midClntSocket, transBuf);
-        //s2c(midSrvConn, midClntSocket, transBuf);
 
         ////阻塞 第二次握手，通过accept来接受对方的套接字的信息
         midSrvConn = accept(midSrvSocket, (struct sockaddr*)&clntAddr, &socklen);
@@ -76,7 +85,7 @@ int main()
             continue;
         }
         else {
-            printf("new client %d...\n", midSrvConn);
+            printf("New client %d...\n", midSrvConn);
         }
 
 
@@ -113,62 +122,74 @@ int main()
             continue;
         }
         //maybe new thread
-        char transBuf[BUFSZ] = { 0 };
-        //while ((recvLen = recv(midSrvConn, transBuf, BUFSZ, 0)) > 1) {
-        //    printf("%d\n", recvLen);
-        //    send(midClntSocket, transBuf, recvLen, 0);
-        //    Sleep(10);
-        //    recv(midClntSocket, transBuf, BUFSZ, 0);
-        //    send(midSrvConn, transBuf, recvLen, 0);
-        //}
-        //from client
+        //char transBuf[BUFSZ] = { 0 };
+
         while(1){
             memset(transBuf, 0, BUFSZ);
-        recvLen = recv(midSrvConn, transBuf, BUFSZ, 0);
-        if (recvLen > 0) {
-            printf("from clent: (%d)%s\n", recvLen, transBuf);
-            //sprintf(sendBuf, BUFSZ, "%s", recvBuf);
+
+            //from client
+            recvLen = recv(midSrvConn, transBuf, BUFSZ, 0);
+            if (recvLen > 0) {
+                printf("from clent: (%d)\n", recvLen);
+                //sprintf(sendBuf, BUFSZ, "%s", recvBuf);
+            }
+            else {
+                printf("connection closed\n");
+                break;
+            }
+            //非阻塞模式 #include <fcntl.h>
+            //int flags = fcntl(socket_fd, F_GETFL, 0);
+            //fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+            //int flags = fcntl(socket_fd, F_GETFL, 0);
+            //fcntl(socket_fd, F_SETFL, flags & ~O_NONBLOCK);
+            ioctlsocket(midSrvConn, FIONBIO, &nonBlockingMode);
+            while (1) {
+
+                //to server
+                iSend = send(midClntSocket, transBuf, recvLen, 0);
+                if (iSend == SOCKET_ERROR) {
+                    printf("send to server failed\n");
+                    break;
+                }
+                Sleep(10);
+                //from client
+                recvLen = recv(midSrvConn, transBuf, BUFSZ, 0);
+                if (recvLen > 0) {
+                    printf("from clent: (%d)\n", recvLen);
+                    //sprintf(sendBuf, BUFSZ, "%s", recvBuf);
+                }
+                else {
+                    printf("receive from clent finished\n");
+                    break;
+                }
+ 
+            }
+            ioctlsocket(midSrvConn, FIONBIO, &blockingMode);
+
+            while (1) {
+                //from server
+                recvLen = recv(midClntSocket, transBuf, BUFSZ, 0);
+                if (recvLen > 0) {
+                    printf("from server: (%d)\n", recvLen);
+                    //sprintf(sendBuf, BUFSZ, "%s", recvBuf);
+                }
+
+                else {
+                    printf("receive from server finished\n");
+                    break;
+                }
+                //to client
+                iSend = send(midSrvConn, transBuf, recvLen, 0);
+                if (iSend == SOCKET_ERROR) {
+                    printf("send to client failed\n");
+                    break;
+                }
+            }
+            //break;
         }
-        else if (recvLen == 0) {
-            printf("receive from clent null\n");
-            break;
-        }
-        else {
-            printf("receive from clent failed\n");
-            break;
-        }
-        //to server
-        iSend = send(midClntSocket, transBuf, recvLen, 0);
-        if (iSend == SOCKET_ERROR) {
-            printf("send to server failed\n");
-            break;
-        }
-        //waiting for server
-        Sleep(10);
-        //from server
-        recvLen = recv(midClntSocket, transBuf, BUFSZ, 0);
-        if (recvLen > 0) {
-            printf("from server: (%d)%s\n", recvLen, transBuf);
-            //sprintf(sendBuf, BUFSZ, "%s", recvBuf);
-        }
-        else if (recvLen == 0) {
-            printf("receive from server null\n");
-            break;
-        }
-        else {
-            printf("receive from server failed\n");
-            break;
-        }
-        //to client
-        iSend = send(midSrvConn, transBuf, recvLen, 0);
-        if (iSend == SOCKET_ERROR) {
-            printf("send to client failed\n");
-            break;
-        }
-    }
-        //Sleep(500);
-        closesocket(midSrvConn);
-        closesocket(midClntSocket);//关闭
+            //Sleep(500);
+            closesocket(midSrvConn);
+            closesocket(midClntSocket);//关闭
 
 
     }
@@ -176,5 +197,6 @@ int main()
     closesocket(midSrvSocket);
     //closesocket(midClntSocket);
     WSACleanup();//释放资源的操作
+    free(transBuf);
     return 0;
 }

@@ -50,9 +50,8 @@ def upload_file():
         filename = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(filename)
         upload_result = "File uploaded successfully"  # Set the upload result
-        
         uploaded_files = os.listdir(app.config['UPLOAD_FOLDER'])
-        return render_template('homepage.html',count=access_counts, upload_result="", uploaded_files=uploaded_files)
+        return render_template('homepage.html',count=access_counts, upload_result=upload_result, uploaded_files=uploaded_files)
     
 if __name__=="__main__":
     app.run("0.0.0.0",4321,True)
