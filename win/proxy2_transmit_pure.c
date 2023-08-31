@@ -6,17 +6,16 @@
 // 4.openssl
 // 
 #include <stdio.h>
-//#include <iostream>
 #include <winsock2.h>
 #include <Ws2tcpip.h>
 #pragma comment(lib,"ws2_32.lib")
+
 
 //const int BUFSZ = 100;
 #define BACKLOG                 (5)	//最大监听数
 #define BUFSZ                   (102400)
 #define sPORT                   (4321)
 #define cPORT                   (4322)
-
 
 int main()
 {

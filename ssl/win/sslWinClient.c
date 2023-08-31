@@ -34,7 +34,7 @@ int main() {
     /*载入所有ssl算法*/
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD* pMethod = TLSv1_2_client_method();
+    const SSL_METHOD* pMethod = TLSv1_2_method();
     SSL_CTX* pCtx = NULL;
     SSL* pSSL = NULL;
 
@@ -152,8 +152,6 @@ int main() {
         X509_NAME_get_text_by_NID(pX509Subject, NID_commonName, szBuf, sizeof(szBuf) - 1);
         printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif		
-        //SSL_write(pSSL, "hello ssl", strlen("hello ssl"));
-        //printf("client send text:\"hello ssl\" to server\n");
 
         printf("Type 'quit' to exit\n");
 
@@ -208,6 +206,7 @@ int main() {
     }
 
     //closesocket(clientSocket);
+    free(buffer);
     return 0;
 }
 

@@ -38,7 +38,7 @@ int main() {
     /*载入所有ssl算法*/
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD* pMethod = TLSv1_2_server_method();
+    const SSL_METHOD* pMethod = TLSv1_2_method();
     SSL_CTX* pCtx = NULL;
     SSL* pSSL = NULL;
     int iRet = 0;
@@ -109,18 +109,12 @@ int main() {
         if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
             printf("%s %d Binding error=%d\n", __func__, __LINE__, errno);
             break;
-            //perror("Binding failed");
-            //closesocket(serverSocket);
-            //exit(EXIT_FAILURE);
         }
 
         // 监听连接请求
         if (listen(serverSocket, BACKLOG) == -1) {
             printf("%s %d Listening error=%d\n", __func__, __LINE__, errno);
             break;
-            //perror("Listening failed");
-            //closesocket(serverSocket);
-            //exit(EXIT_FAILURE);
         }
 
         
