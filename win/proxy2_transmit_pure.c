@@ -35,7 +35,7 @@ int main()
     int iSend = 0;
     char* transBuf;
     transBuf = (char*)malloc(BUFSIZE*sizeof(char));
-    char ipBuf[16] = { 0 };
+    char ipBuf[16] = "127.0.0.1";
 
     unsigned long nonBlockingMode = 1;
     unsigned long blockingMode = 0; 
@@ -72,6 +72,7 @@ int main()
             printf("Listen failed:%d\n", WSAGetLastError());
             break;
         }
+        printf("proxy listening...\n");
 
         //maybe new thread
         while (1)
@@ -89,8 +90,8 @@ int main()
             setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
 
             //as a client
-            //inet_pton(AF_INET, sIP, &proxyAddr2Serv.sin_addr.S_un.S_addr);
-            proxyAddr2Serv.sin_addr.S_un.S_addr = clntAddr.sin_addr.S_un.S_addr;
+            inet_pton(AF_INET, ipBuf, &proxyAddr2Serv.sin_addr.s_addr);
+            //proxyAddr2Serv.sin_addr.S_un.S_addr = clntAddr.sin_addr.S_un.S_addr;
             proxyAddr2Serv.sin_family = AF_INET;
             proxyAddr2Serv.sin_port = htons(PORT2SERV);
 
@@ -110,13 +111,13 @@ int main()
             setsockopt(proxySocket2Serv, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
             //向服务器发出连接请求
             if (
-                connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, sizeof(proxyAddr2Serv))
+                connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, addrSize)
                 == INVALID_SOCKET
                 ) {
                 //printf("%d", r);
                 printf("Connect failed: %d\n", WSAGetLastError());
-                closesocket(proxyConn2Clnt);
                 closesocket(proxySocket2Serv);//关闭
+                closesocket(proxyConn2Clnt);
                 continue;
             }
 
@@ -134,11 +135,6 @@ int main()
                     break;
                 }
 
-                //非阻塞模式 #include <fcntl.h>
-                //int flags = fcntl(socket_fd, F_GETFL, 0);
-                //fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
-                //int flags = fcntl(socket_fd, F_GETFL, 0);
-                //fcntl(socket_fd, F_SETFL, flags & ~O_NONBLOCK);
 #if nonBlockMode
                 ioctlsocket(proxyConn2Clnt, FIONBIO, &nonBlockingMode);
 #endif
