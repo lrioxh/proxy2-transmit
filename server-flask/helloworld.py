@@ -7,6 +7,7 @@ app = Flask(__name__,template_folder="templates")
 app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(),'server-flask/file_archive')
 
 access_counts = {}
+ip=""
 
 def count_access(route_func):
     @wraps(route_func)
@@ -21,8 +22,10 @@ def count_access(route_func):
 @app.route('/')
 @count_access
 def hello_world():
+    global ip
+    ip = request.remote_addr
     uploaded_files = os.listdir(app.config['UPLOAD_FOLDER'])
-    return render_template('homepage.html',count=access_counts, upload_result="", uploaded_files=uploaded_files)
+    return render_template('homepage.html',count=access_counts, upload_result="", uploaded_files=uploaded_files,user_ip=ip)
 
 
 @app.route('/download/',defaults={"selected_file":"test.jpg"})
@@ -41,6 +44,8 @@ def download_file():
 @app.route('/upload', methods=['POST'])
 @count_access
 def upload_file():
+    global ip
+    ip = request.remote_addr
     if 'file' not in request.files:
         return "No file part"
     file = request.files['file']
@@ -51,7 +56,7 @@ def upload_file():
         file.save(filename)
         upload_result = "File uploaded successfully"  # Set the upload result
         uploaded_files = os.listdir(app.config['UPLOAD_FOLDER'])
-        return render_template('homepage.html',count=access_counts, upload_result=upload_result, uploaded_files=uploaded_files)
+        return render_template('homepage.html',count=access_counts, upload_result=upload_result, uploaded_files=uploaded_files,user_ip=ip)
     
 if __name__=="__main__":
     app.run("0.0.0.0",4321,True)
