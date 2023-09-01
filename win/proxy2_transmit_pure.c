@@ -31,10 +31,10 @@ int main()
     struct sockaddr_in proxyAddr2Serv = { 0 };
     struct sockaddr_in clntAddr = { 0 };
     int addrSize = sizeof(struct sockaddr);
-    int recvByte = 0;
-    int iSend = 0;
-    char* transBuf;
-    transBuf = (char*)malloc(BUFSIZE*sizeof(char));
+    //int recvBytes = 0;
+    //int sendBytes = 0;
+    //char* transBuf;
+    //transBuf = (char*)malloc(BUFSIZE*sizeof(char));
     char ipBuf[16] = "127.0.0.1";
 
     unsigned long nonBlockingMode = 1;
@@ -121,13 +121,17 @@ int main()
                 continue;
             }
 
+            int recvBytes = 0;
+            int sendBytes = 0;
+            char* transBuf;
+            transBuf = (char*)malloc(BUFSIZE * sizeof(char));
             while (1) {
                 memset(transBuf, 0, BUFSIZE);
 
                 //from client 阻塞
-                recvByte = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
-                if (recvByte > 0) {
-                    printf("from clent: (%d)\n", recvByte);
+                recvBytes = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
+                if (recvBytes > 0) {
+                    printf("from clent: (%d)\n", recvBytes);
                     //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                 }
                 else {
@@ -140,16 +144,16 @@ int main()
 #endif
                 while (1) {
                     //to server
-                    iSend = send(proxySocket2Serv, transBuf, recvByte, 0);
-                    if (iSend == SOCKET_ERROR) {
+                    sendBytes = send(proxySocket2Serv, transBuf, recvBytes, 0);
+                    if (sendBytes == SOCKET_ERROR) {
                         printf("send to server failed\n");
                         break;
                     }
                     //Sleep(2);
                     //from client
-                    recvByte = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
-                    if (recvByte > 0) {
-                        printf("from clent: (%d)\n", recvByte);
+                    recvBytes = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
+                    if (recvBytes > 0) {
+                        printf("from clent: (%d)\n", recvBytes);
                         //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                     }
                     else {
@@ -163,9 +167,9 @@ int main()
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &nonBlockingMode);
                 while (1) {
                     //from server
-                    recvByte = recv(proxySocket2Serv, transBuf, BUFSIZE, 0);
-                    if (recvByte > 0) {
-                        printf("from server: (%d)\n", recvByte);
+                    recvBytes = recv(proxySocket2Serv, transBuf, BUFSIZE, 0);
+                    if (recvBytes > 0) {
+                        printf("from server: (%d)\n", recvBytes);
                         //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                     }
                     else {
@@ -173,8 +177,8 @@ int main()
                         break;
                     }
                     //to client
-                    iSend = send(proxyConn2Clnt, transBuf, recvByte, 0);
-                    if (iSend == SOCKET_ERROR) {
+                    sendBytes = send(proxyConn2Clnt, transBuf, recvBytes, 0);
+                    if (sendBytes == SOCKET_ERROR) {
                         printf("send to client failed\n");
                         break;
                     }
@@ -182,6 +186,7 @@ int main()
 
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &blockingMode);
                 //break;
+                free(transBuf);
             }
             closesocket(proxyConn2Clnt);
             closesocket(proxySocket2Serv);//关闭
@@ -200,6 +205,6 @@ int main()
     }
 
     WSACleanup();//释放资源的操作
-    free(transBuf);
+    //free(transBuf);
     return 0;
 }
