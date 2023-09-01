@@ -2,80 +2,169 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/unistd.h>  
+#include <sys/time.h>
+#include <sys/epoll.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 
-#define BUFFER_SIZE (1024)
+#define BACKLOG                 (5)	//最大监听数
+#define BUFSIZE                 (10240)
+#define PORT2SERV               (4321)
+#define PORT2CLNT               (4322)
+#define nonBlockMode            (1)
 
-int main(int argc, char *argv[]) {
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <proxy_port> <server_ip> <server_port>\n", argv[0]);
-        exit(1);
-    }
+//sudo tcpdump -iany tcp port 4322
 
-    int proxy_port = atoi(argv[1]);
-    char *server_ip = argv[2];
-    int server_port = atoi(argv[3]);
+// int main(int argc, char *argv[]) {
+int main() {
 
-    int proxy_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (proxy_socket == -1) {
-        perror("Socket creation failed");
-        exit(1);
-    }
+    int proxySocket = -1;
+    int proxyConn2Clnt = -1;
+    int proxySocket2Serv = -1;
+    struct sockaddr_in proxyAddr = { 0 };
+    struct sockaddr_in proxyAddr2Serv = { 0 };
+    struct sockaddr_in clntAddr = { 0 };
+    int addrSize = sizeof(struct sockaddr);
+    int recvByte = 0;
+    int iSend = 0;
+    char* transBuf;
+    transBuf = (char*)malloc(BUFSIZE*sizeof(char));
+    char ipBuf[16] = "192.168.137.1";
+    int nonBlockFlags=0;
 
-    struct sockaddr_in proxy_addr, server_addr;
-    proxy_addr.sin_family = AF_INET;
-    proxy_addr.sin_port = htons(proxy_port);
-    proxy_addr.sin_addr.s_addr = INADDR_ANY;
+    unsigned long nonBlockingMode = 1;
+    unsigned long blockingMode = 0; 
+    struct timeval timeout;
+    timeout.tv_sec = 5;  // 设置超时为5秒
+    timeout.tv_usec = 0;
 
-    if (bind(proxy_socket, (struct sockaddr *)&proxy_addr, sizeof(proxy_addr)) == -1) {
-        perror("Binding failed");
-        exit(1);
-    }
+    //as a server
+    proxyAddr.sin_family = AF_INET;
+    proxyAddr.sin_addr.s_addr = htonl(INADDR_ANY);//ip地址
+    proxyAddr.sin_port = htons(PORT2CLNT);//绑定端口
 
-    if (listen(proxy_socket, 5) == -1) {
-        perror("Listening failed");
-        exit(1);
-    }
+    do{
+        proxySocket = socket(AF_INET, SOCK_STREAM, 0);
+        if (proxySocket < 0 ) {
+            printf("%s(%d)Socket error:%d\n", __func__, __LINE__, errno);
+            break;
+        }   
+        if (bind(proxySocket, (struct sockaddr*)&proxyAddr, addrSize) <0) {
+            printf("%s(%d)Failed bind:%d\n", __func__, __LINE__, errno);
+            break;
+        }     
+        if (listen(proxySocket, BACKLOG) <0) {
+            printf("%s(%d)Listen failed:%d\n", __func__, __LINE__, errno);
+            break;
+        }
+        printf("proxy listening...\n");
+        //maybe new thread
+        while (1){
+            proxyConn2Clnt = accept(proxySocket, (struct sockaddr*)&clntAddr, &addrSize);
+            if (proxyConn2Clnt <0) {
+                printf("%s(%d)Accept failed:%d\n", __func__, __LINE__, errno);
+                continue;
+            }else {
+                printf("\nNew Client %d...\n", proxyConn2Clnt);
+            }
+            setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1          
+            nonBlockFlags = fcntl(proxyConn2Clnt, F_GETFL, 0);
 
-    printf("Proxy listening on port %d...\n", proxy_port);
+            inet_pton(AF_INET, ipBuf, &proxyAddr2Serv.sin_addr.s_addr);
+            // proxyAddr2Serv.sin_addr.s_addr = clntAddr.sin_addr.s_addr;
+            proxyAddr2Serv.sin_family = AF_INET;
+            proxyAddr2Serv.sin_port = htons(PORT2SERV);
 
-    while (1) {
-        int client_socket = accept(proxy_socket, NULL, NULL);
-        if (client_socket == -1) {
-            perror("Accepting client connection failed");
-            continue;
+            proxySocket2Serv = socket(AF_INET, SOCK_STREAM, 0);
+            if (proxySocket2Serv <0) {
+                printf("%s(%d)Client socket error: %d\n",__func__, __LINE__, errno);
+                close(proxySocket2Serv);
+                continue;
+            }
+            setsockopt(proxySocket2Serv, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
+            if (
+                connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, addrSize)
+                <0
+                ) {
+                printf("%s(%d)Connect to server failed: %d\n",__func__, __LINE__, errno);
+                close(proxySocket2Serv);//关闭
+                close(proxyConn2Clnt);
+                continue;
+            }
+            //
+            while (1) {
+                memset(transBuf, 0, BUFSIZE);
+
+                //from client 阻塞
+                recvByte = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
+                if (recvByte > 0) {
+                    printf("from clent: (%d)\n", recvByte);
+                    //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
+                }else {
+                    printf("connection closed\n");
+                    break;
+                }
+# if nonBlockMode
+                fcntl(proxyConn2Clnt, F_SETFL, nonBlockFlags | O_NONBLOCK);
+# endif
+                while (1) {
+                    //to server
+                    iSend = send(proxySocket2Serv, transBuf, recvByte, 0);
+                    if (iSend <0) {
+                        printf("send to server failed\n");
+                        break;
+                    }
+                    //from client
+                    recvByte = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
+                    if (recvByte > 0) {
+                        printf("from clent: (%d)\n", recvByte);
+                        //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
+                    }else {
+                        printf("receive from clent finished\n");
+                        break;
+                    }
+                }
+# if nonBlockMode
+                fcntl(proxyConn2Clnt, F_SETFL, nonBlockFlags & ~O_NONBLOCK);
+# endif
+                while (1) {
+                    //from server
+                    recvByte = recv(proxySocket2Serv, transBuf, BUFSIZE, 0);
+                    if (recvByte > 0) {
+                        printf("from server: (%d)\n", recvByte);
+                        //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
+                    }else {
+                        printf("receive from server finished\n");
+                        break;
+                    }
+                    //to client
+                    iSend = send(proxyConn2Clnt, transBuf, recvByte, 0);
+                    if (iSend <0) {
+                        printf("send to client failed\n");
+                        break;
+                    }
+                }
+            }
+            close(proxySocket2Serv);//关闭
+            close(proxyConn2Clnt);
+
+
+
         }
 
-        int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-        if (server_socket == -1) {
-            perror("Server socket creation failed");
-            close(client_socket);
-            continue;
-        }
+    }while(0);
 
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(server_port);
-        inet_pton(AF_INET, server_ip, &server_addr.sin_addr);
 
-        if (connect(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-            perror("Connecting to server failed");
-            close(client_socket);
-            close(server_socket);
-            continue;
-        }
-
-        char buffer[BUFFER_SIZE];
-        int bytes_received;
-        while ((bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-            send(server_socket, buffer, bytes_received, 0);
-            recv(server_socket, buffer, BUFFER_SIZE, 0);
-            send(client_socket, buffer, bytes_received, 0);
-        }
-
-        close(client_socket);
-        close(server_socket);
+    if (proxyConn2Clnt > 0) {
+        close(proxyConn2Clnt);
     }
-
-    close(proxy_socket);
+    if (proxySocket > 0) {
+        close(proxySocket);
+    }    
+    if (proxySocket2Serv > 0) {
+        close(proxySocket2Serv);
+    }
+    free(transBuf);
     return 0;
 }
