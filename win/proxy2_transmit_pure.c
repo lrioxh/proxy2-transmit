@@ -17,7 +17,7 @@
 #define BUFSIZE                 (102400)
 #define PORT2SERV               (4321)
 #define PORT2CLNT               (4322)
-#define nonBlockMode            (0)
+#define nonBlockMode            (1)
 
 int main()
 {
