@@ -204,7 +204,7 @@ int main() {
     {
         closesocket(clientSocket);
     }
-
+    WSACleanup();//释放资源的操作
     //closesocket(clientSocket);
     free(buffer);
     return 0;

@@ -7,6 +7,7 @@
 //openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 365
 // ×ÔÇ©Ãû
 //openssl x509 -req -days 365 -in server.csr -signkey ca.key -out server.crt
+//https://learn.microsoft.com/zh-cn/azure/application-gateway/self-signed-certificates
 
 #include <stdio.h>
 #include <stdlib.h>

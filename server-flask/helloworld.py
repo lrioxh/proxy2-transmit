@@ -5,6 +5,7 @@ from functools import wraps
 from flask import Flask,send_file,render_template,request
 app = Flask(__name__,template_folder="templates")
 app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(),'server-flask/file_archive')
+app.config['CA_FOLDER'] = os.path.join(os.getcwd(),'ssl/ca')
 
 access_counts = {}
 ip=""
@@ -59,4 +60,5 @@ def upload_file():
         return render_template('homepage.html',count=access_counts, upload_result=upload_result, uploaded_files=uploaded_files,user_ip=ip)
     
 if __name__=="__main__":
-    app.run("0.0.0.0",4321,True)
+    print(os.getcwd())
+    app.run("0.0.0.0",4321,debug=True,ssl_context=(f"{app.config['CA_FOLDER']}/server.crt", f"{app.config['CA_FOLDER']}/server.key"))
