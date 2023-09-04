@@ -186,8 +186,8 @@ int main()
 
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &blockingMode);
                 //break;
-                free(transBuf);
             }
+            free(transBuf);
             closesocket(proxyConn2Clnt);
             closesocket(proxySocket2Serv);//关闭
         }
