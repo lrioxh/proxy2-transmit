@@ -17,7 +17,7 @@
 #define BUFSIZE                 (102400)
 #define PORT2SERV               (4321)
 #define PORT2CLNT               (4322)
-#define nonBlockMode            (0)
+#define nonBlockMode            (1)
 
 int main()
 {
@@ -124,10 +124,9 @@ int main()
             int recvBytes = 0;
             int sendBytes = 0;
             char* transBuf;
-            transBuf = (char*)malloc(BUFSIZE * sizeof(char));
+            transBuf = (char*)malloc(BUFSIZE*sizeof(char));
             while (1) {
-                memset(transBuf, 0, BUFSIZE);
-
+                memset(transBuf, '\0', BUFSIZE);
                 //from client 阻塞
                 recvBytes = recv(proxyConn2Clnt, transBuf, BUFSIZE, 0);
                 if (recvBytes > 0) {
@@ -186,8 +185,8 @@ int main()
 
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &blockingMode);
                 //break;
-                free(transBuf);
             }
+            free(transBuf);
             closesocket(proxyConn2Clnt);
             closesocket(proxySocket2Serv);//关闭
         }
