@@ -175,7 +175,8 @@ int main()
                 printf("New client %d...\n", proxyConn2Clnt);
             }
 
-            setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
+            setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//recv超时返回-1
+            //setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));//send超时返回-1
 
              /*基于pCtx产生一个新的ssl*/
             pSSL2Clnt = SSL_new(pCtx2Clnt);
@@ -188,7 +189,8 @@ int main()
             SSL_set_fd(pSSL2Clnt, proxyConn2Clnt);
 
             /*建立ssl连接（握手）*/
-            if (iRet = SSL_accept(pSSL2Clnt) <= 0)
+            iRet = SSL_accept(pSSL2Clnt);
+            if (iRet < 0)
             {
                 printf("%s %d iRet=%d %s\n", __func__, __LINE__, iRet, ERR_error_string(SSL_get_error(pSSL2Clnt, iRet), NULL));
                 continue;
@@ -210,14 +212,14 @@ int main()
                 continue;
             }
             else {
-                printf("client socket seccess: %d\n", proxySocket2Serv);
+                printf("socket to serv seccess: %d\n", proxySocket2Serv);
             }
             setsockopt(proxySocket2Serv, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
             //向服务器发出连接请求
             if (
                 connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, addrSize)
                 == INVALID_SOCKET
-                ) {
+                ){
                 //printf("%d", r);
                 printf("Connect failed: %d\n", WSAGetLastError());
                 closesocket(proxySocket2Serv);//关闭
@@ -273,12 +275,12 @@ int main()
             X509_NAME_get_text_by_NID(pX509Subject, NID_commonName, szBuf, sizeof(szBuf) - 1);
             printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif		
+            int recvBytes = 0;
+            int sendBytes = 0;
+            char* transBuf;
+            transBuf = (char*)malloc(BUFSIZE * sizeof(char));
             // delivering messege
             while (1) {
-                int recvBytes = 0;
-                int sendBytes = 0;
-                char* transBuf;
-                transBuf = (char*)malloc(BUFSIZE * sizeof(char));
                 memset(transBuf, '\0', BUFSIZE);
 
                 //from client 阻塞
@@ -294,12 +296,13 @@ int main()
                 }
 
 #if nonBlockMode
-                ioctlsocket(proxyConn2Clnt, FIONBIO, &nonBlockingMode);
+                //ioctlsocket(proxyConn2Clnt, FIONBIO, &nonBlockingMode);
+                SSL_set_mode(pSSL2Clnt, SSL_MODE_AUTO_RETRY);
 #endif
                 while (1) {
                     //to server
                     //sendBytes = send(proxySocket2Serv, transBuf, recvBytes, 0);
-                    sendBytes=SSL_write(pSSL2Serv, transBuf, strlen(transBuf));
+                    sendBytes=SSL_write(pSSL2Serv, transBuf, recvBytes);
                     if (sendBytes == SOCKET_ERROR) {
                         printf("send to server failed\n");
                         break;
@@ -311,41 +314,44 @@ int main()
                     if (recvBytes > 0) {
                         printf("from clent: (%d)\n", recvBytes);
                         //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
-                    }
-                    else {
+                    }else {
                         printf("receive from clent finished\n");
                         break;
                     }
                 }
 #if nonBlockMode
-                ioctlsocket(proxyConn2Clnt, FIONBIO, &blockingMode);
-#endif
+                //ioctlsocket(proxyConn2Clnt, FIONBIO, &blockingMode);
+                SSL_clear_mode(pSSL2Clnt, SSL_MODE_AUTO_RETRY);
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &nonBlockingMode);
+
+#endif
                 while (1) {
                     //from server
+                     //int ready = select(socket_fd + 1, &read_fds, NULL, NULL, &timeout);
                     //recvBytes = recv(proxySocket2Serv, transBuf, BUFSIZE, 0);
                     recvBytes = SSL_read(pSSL2Serv, transBuf, BUFSIZE);
                     if (recvBytes > 0) {
-                        printf("from server: (%d)%s\n", recvBytes, transBuf);
+                        printf("from server: (%d)\n", recvBytes);
+                        //printf("from server: (%d)%s\n", recvBytes, transBuf);
                         //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
-                    }
-                    else {
+                    }else {
                         printf("receive from server finished\n");
                         break;
                     }
                     //to client
                     //sendBytes = send(proxyConn2Clnt, transBuf, recvBytes, 0);
-                    sendBytes = SSL_write(pSSL2Clnt, transBuf, strlen(transBuf));
+                    sendBytes = SSL_write(pSSL2Clnt, transBuf, recvBytes);
                     if (sendBytes == SOCKET_ERROR) {
                         printf("send to client failed\n");
                         break;
                     }
                 }
-
+#if nonBlockMode
                 //ioctlsocket(proxySocket2Serv, FIONBIO, &blockingMode);
+#endif
                 //break;
-                free(transBuf);
             }
+            free(transBuf);
             SSL_shutdown(pSSL2Clnt);
             SSL_shutdown(pSSL2Serv);
             closesocket(proxyConn2Clnt);

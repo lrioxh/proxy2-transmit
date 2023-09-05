@@ -6,6 +6,9 @@ from flask import Flask,send_file,render_template,request
 app = Flask(__name__,template_folder="templates")
 app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(),'server-flask/file_archive')
 app.config['CA_FOLDER'] = os.path.join(os.getcwd(),'ssl/ca')
+import ssl
+context = ssl.SSLContext()
+context.load_cert_chain(f"{app.config['CA_FOLDER']}/server.crt", f"{app.config['CA_FOLDER']}/server.key")
 
 access_counts = {}
 ip=""
@@ -61,4 +64,5 @@ def upload_file():
     
 if __name__=="__main__":
     print(os.getcwd())
-    app.run("0.0.0.0",4321,debug=True,ssl_context=(f"{app.config['CA_FOLDER']}/server.crt", f"{app.config['CA_FOLDER']}/server.key"))
+    # app.run("0.0.0.0",4321,debug=True)
+    app.run("0.0.0.0",4321,debug=True,ssl_context=context)
