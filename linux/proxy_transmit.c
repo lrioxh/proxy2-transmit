@@ -10,7 +10,7 @@
 
 #define MAX_EVENTS              (10) //epoll
 #define BACKLOG                 (5)	//最大监听数
-#define BUFSIZE                 (10240)
+#define BUFSIZE                 (102400)
 #define PORT2SERV               (4321)
 #define PORT2CLNT               (4322)
 #define nonBlockMode            (1)
@@ -21,11 +21,7 @@
 int main() {
 
     int proxySocket = -1;
-    int proxyConn2Clnt = -1;
-    int proxySocket2Serv = -1;
     struct sockaddr_in proxyAddr = { 0 };
-    struct sockaddr_in proxyAddr2Serv = { 0 };
-    struct sockaddr_in clntAddr = { 0 };
     socklen_t addrSize = sizeof(struct sockaddr);
     // int recvByte = 0;
     // int iSend = 0;
@@ -78,6 +74,7 @@ int main() {
         //maybe new thread
         while (1){
             int epoll_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+
             if (epoll_ready <0) {
                 printf("%s(%d)Epoll wait error:%d\n", __func__, __LINE__, errno);
                 continue;
@@ -85,50 +82,53 @@ int main() {
             for (int i = 0; i < epoll_ready; i++) {
                 if (events[i].data.fd == proxySocket) {
                 // 有新的连接请求
-                proxyConn2Clnt = accept(proxySocket, (struct sockaddr*)&clntAddr, &addrSize);
-                if (proxyConn2Clnt <0) {
-                    printf("%s(%d)Accept failed:%d\n", __func__, __LINE__, errno);
-                    continue;
-                }else {
-                    printf("\nNew Client %d...\n", proxyConn2Clnt);
-                }
-                setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1          
-                nonBlockFlags = fcntl(proxyConn2Clnt, F_GETFL, 0);
+                    int proxyConn2Clnt = -1;
+                    struct sockaddr_in clntAddr = { 0 };
+                    proxyConn2Clnt = accept(proxySocket, (struct sockaddr*)&clntAddr, &addrSize);
+                    if (proxyConn2Clnt <0) {
+                        printf("%s(%d)Accept failed:%d\n", __func__, __LINE__, errno);
+                        continue;
+                    }else {
+                        printf("\nNew Client %d...\n", proxyConn2Clnt);
+                    }
+                    setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1          
+                    nonBlockFlags = fcntl(proxyConn2Clnt, F_GETFL, 0);
 
-                inet_pton(AF_INET, ipBuf, &proxyAddr2Serv.sin_addr.s_addr);
-                // proxyAddr2Serv.sin_addr.s_addr = clntAddr.sin_addr.s_addr;
-                proxyAddr2Serv.sin_family = AF_INET;
-                proxyAddr2Serv.sin_port = htons(PORT2SERV);
-                proxySocket2Serv = socket(AF_INET, SOCK_STREAM, 0);
-                if (proxySocket2Serv <0) {
-                    printf("%s(%d)Client socket error: %d\n",__func__, __LINE__, errno);
-                    close(proxySocket2Serv);
-                    continue;
-                }
-                setsockopt(proxySocket2Serv, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
-                if (
-                    connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, addrSize)
-                    <0
-                    ) {
-                    printf("%s(%d)Connect to server failed: %d\n",__func__, __LINE__, errno);
-                    close(proxySocket2Serv);//关闭
-                    close(proxyConn2Clnt);
-                    continue;
-                }
-                // 将客户端socket注册到epoll
-                event.events = EPOLLIN;
-                event.data.fd = proxyConn2Clnt;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, proxyConn2Clnt, &event) == -1) {
-                    printf("%s(%d)Epoll control error:%d\n", __func__, __LINE__, errno);
-                    continue;
-                }
+                    // 将客户端socket注册到epoll
+                    event.events = EPOLLIN;
+                    event.data.fd = proxyConn2Clnt;
+                    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, proxyConn2Clnt, &event) == -1) {
+                        printf("%s(%d)Epoll control error:%d\n", __func__, __LINE__, errno);
+                        close(proxyConn2Clnt);
+                        continue;
+                    }
                 }else{
+                    int proxySocket2Serv = -1;
+                    struct sockaddr_in proxyAddr2Serv = { 0 };
+                    inet_pton(AF_INET, ipBuf, &proxyAddr2Serv.sin_addr.s_addr);
+                    // proxyAddr2Serv.sin_addr.s_addr = clntAddr.sin_addr.s_addr;
+                    proxyAddr2Serv.sin_family = AF_INET;
+                    proxyAddr2Serv.sin_port = htons(PORT2SERV);
+                    proxySocket2Serv = socket(AF_INET, SOCK_STREAM, 0);
+                    if (proxySocket2Serv <0) {
+                        printf("%s(%d)Client socket error: %d\n",__func__, __LINE__, errno);
+                        continue;
+                    }
+                    setsockopt(proxySocket2Serv, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));//超时返回-1
+                    if (
+                        connect(proxySocket2Serv, (struct sockaddr*)&proxyAddr2Serv, addrSize)
+                        <0
+                        ) {
+                        printf("%s(%d)Connect to server failed: %d\n",__func__, __LINE__, errno);
+                        close(proxySocket2Serv);
+                        continue;
+                    }
                     // 有数据可读
                     int recv_bytes=0,send_bytes=0;
                     char* buffer;
                     buffer = (char*)malloc(BUFSIZE*sizeof(char));
                     while (1) {
-                        memset(buffer, 0, sizeof(buffer));
+                        memset(buffer, '\0', sizeof(buffer));
 
                         recv_bytes = recv(events[i].data.fd, buffer, BUFSIZE, 0);
                         if (recv_bytes > 0) {
@@ -136,9 +136,9 @@ int main() {
                             //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                         }else {
                             // 客户端断开连接或出错，从epoll中移除
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
-                            close(events[i].data.fd);
-                            printf("Client disconnected\n");
+                            // epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
+                            // close(events[i].data.fd);
+                            printf("Client disconnected:%d %d\n",recv_bytes,errno);
                             break;
                         }
 # if nonBlockMode
@@ -158,7 +158,7 @@ int main() {
                                 printf("from clent: (%d)\n", recv_bytes);
                                 //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                             }else {
-                                printf("receive from clent finished\n");
+                                printf("receive from clent finished:%d %d\n",recv_bytes,errno);
                                 break;
                             }
                         }
@@ -173,7 +173,7 @@ int main() {
                                 printf("from server: (%d)\n", recv_bytes);
                                 //sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                             }else {
-                                printf("receive from server finished\n");
+                                printf("receive from server finished:%d %d\n",recv_bytes,errno);
                                 break;
                             }
                             //to client
@@ -183,12 +183,16 @@ int main() {
                                 break;
                             }
                         }
-                        free(buffer);
 
                     }
+                    free(buffer);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
+                    close(proxySocket2Serv);
+                    close(events[i].data.fd);
 
                 
                 }
+
             }
 
 
@@ -288,15 +292,15 @@ int main() {
     }while(0);
 
 
-    if (proxyConn2Clnt > 0) {
-        close(proxyConn2Clnt);
-    }
+    // if (proxyConn2Clnt > 0) {
+    //     close(proxyConn2Clnt);
+    // }
     if (proxySocket > 0) {
         close(proxySocket);
     }    
-    if (proxySocket2Serv > 0) {
-        close(proxySocket2Serv);
-    }
+    // if (proxySocket2Serv > 0) {
+    //     close(proxySocket2Serv);
+    // }
     // free(transBuf);
     return 0;
 }
