@@ -1,7 +1,7 @@
 // TODO
 // epoll -o
 // ssl  -o
-// test nonblock with waiting event -nextweek
+// test nonblock with waiting event
 
 // sudo apt install libssl-dev
 // sudo tcpdump -iany tcp port 4322
@@ -16,7 +16,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <openssl/ssl.h>
-#include <openssl/bio.h>
+// #include <openssl/bio.h>
 #include <openssl/err.h>
 
 #define MAX_EVENTS (10) // epoll
@@ -30,7 +30,7 @@
 const char *const pCAPath = "../ssl/ca/ca.crt";
 const char *const certificate_path = "../ssl/ca/proxy.crt";
 const char *const private_key_path = "../ssl/ca/proxy.key";
-const char *const password = "123456";
+// const char *const password = "123456";
 
 // int main(int argc, char *argv[]) {
 int main()
@@ -46,34 +46,44 @@ int main()
     const SSL_METHOD *pMethod = TLSv1_2_method();
     SSL_CTX *pCtx2Serv = NULL;
     SSL_CTX *pCtx2Clnt = NULL;
-    // SSL* pSSL2Serv = NULL;
-    // SSL* pSSL2Clnt = NULL;
+    SSL* pSSL2Serv = NULL;
+    SSL* pSSL2Clnt = NULL;
 
-    // int iRet = -1;
-    // X509* pX509Cert = NULL;
-    // X509_NAME* pX509Subject = NULL;
+    int iRet = -1;
+    X509* pX509Cert = NULL;
+    X509_NAME* pX509Subject = NULL;
 
     int proxySocket = -1;
     struct sockaddr_in proxyAddr = {0};
     socklen_t addrSize = sizeof(struct sockaddr);
-    // int recvByte = 0;
-    // int iSend = 0;
-    // char* transBuf;
-    // transBuf = (char*)malloc(BUFSIZE*sizeof(char));
+    int proxyConn2Clnt = -1;
+    struct sockaddr_in clntAddr = {0};
+    int proxySocket2Serv = -1;
+    struct sockaddr_in proxyAddr2Serv = {0};
+
+    int recvBytes = 0;
+    int sendBytes = 0;
+    char* transBuf;
+    transBuf = (char*)malloc(BUFSIZE*sizeof(char));
     char ipBuf[16] = "192.168.137.1";
 
     int nonBlockFlags = 0;
     struct timeval timeout;
     timeout.tv_sec = 5; // 设置超时为5秒
     timeout.tv_usec = 0;
+
     int epoll_fd = -1;
-    // int epoll_ready=0;
+    int epoll_ready=0;
     struct epoll_event event, events[MAX_EVENTS];
 
     // as a server
     proxyAddr.sin_family = AF_INET;
     proxyAddr.sin_addr.s_addr = htonl(INADDR_ANY); // ip地址
     proxyAddr.sin_port = htons(PORT2CLNT);         // 绑定端口
+
+    char szBuf[256] = {0};
+    char szSubject[1024] = {0};
+    char szIssuer[256] = {0};
 
     do
     {
@@ -94,10 +104,10 @@ int main()
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
-#if 1
-        /*设置私钥的解锁密码*/
-        SSL_CTX_set_default_passwd_cb_userdata(pCtx2Clnt, password);
-#endif
+// #if 1
+//         /*设置私钥的解锁密码*/
+//         SSL_CTX_set_default_passwd_cb_userdata(pCtx2Clnt, password);
+// #endif
         /* 载入用户私钥 */
         if (SSL_CTX_use_PrivateKey_file(pCtx2Clnt, private_key_path, SSL_FILETYPE_PEM) <= 0)
         {
@@ -168,7 +178,8 @@ int main()
         // maybe new thread
         while (1)
         {
-            int epoll_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+            //-1: waiting forever(ms)
+            epoll_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
             if (epoll_ready < 0)
             {
@@ -180,8 +191,8 @@ int main()
                 if (events[i].data.fd == proxySocket)
                 {
                     // 有新的连接请求
-                    int proxyConn2Clnt = -1;
-                    struct sockaddr_in clntAddr = {0};
+                    proxyConn2Clnt = -1;
+                    // struct sockaddr_in clntAddr = {0};
                     proxyConn2Clnt = accept(proxySocket, (struct sockaddr *)&clntAddr, &addrSize);
                     if (proxyConn2Clnt < 0)
                     {
@@ -209,13 +220,13 @@ int main()
                 else
                 {
                     // as client to server
-                    int proxySocket2Serv = -1;
-                    int iRet = -1;
-                    struct sockaddr_in proxyAddr2Serv = {0};
-                    SSL *pSSL2Clnt = NULL;
-                    SSL *pSSL2Serv = NULL;
-                    X509 *pX509Cert = NULL;
-                    X509_NAME *pX509Subject = NULL;
+                    proxySocket2Serv = -1;
+                    // int iRet = -1;
+                    // struct sockaddr_in proxyAddr2Serv = {0};
+                    // SSL *pSSL2Clnt = NULL;
+                    // SSL *pSSL2Serv = NULL;
+                    // X509 *pX509Cert = NULL;
+                    // X509_NAME *pX509Subject = NULL;
 
                     inet_pton(AF_INET, ipBuf, &proxyAddr2Serv.sin_addr.s_addr);
                     // proxyAddr2Serv.sin_addr.s_addr = clntAddr.sin_addr.s_addr;
@@ -224,7 +235,6 @@ int main()
 
                     do
                     {
-
                         proxySocket2Serv = socket(AF_INET, SOCK_STREAM, 0);
                         if (proxySocket2Serv < 0)
                         {
@@ -308,46 +318,46 @@ int main()
                             // close(proxySocket2Serv);
                             break;
                         }
-                        char szBuf[256] = {0};
-                        char szSubject[1024] = {0};
-                        char szIssuer[256] = {0};
+                        // char szBuf[256] = {0};
+                        // char szSubject[1024] = {0};
+                        // char szIssuer[256] = {0};
                         X509_NAME_oneline(pX509Subject, szSubject, sizeof(szSubject) - 1);
                         X509_NAME_oneline(X509_get_issuer_name(pX509Cert), szIssuer, sizeof(szIssuer) - 1);
                         X509_NAME_get_text_by_NID(pX509Subject, NID_commonName, szBuf, sizeof(szBuf) - 1);
                         printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif
                         // 有数据可读
-                        int recv_bytes = 0, send_bytes = 0;
-                        char *buffer;
-                        buffer = (char *)malloc(BUFSIZE * sizeof(char));
+                        // int recvBytes = 0, sendBytes = 0;
+                        // char *transBuf;
+                        // transBuf = (char *)malloc(BUFSIZE * sizeof(char));
                         while (1)
                         {
-                            memset(buffer, '\0', sizeof(buffer));
+                            memset(transBuf, '\0', sizeof(transBuf));
 
-                            // recv_bytes = recv(events[i].data.fd, buffer, BUFSIZE, 0);
-                            recv_bytes = SSL_read(pSSL2Clnt, buffer, BUFSIZE);
-                            if (recv_bytes > 0)
+                            // recvBytes = recv(events[i].data.fd, transBuf, BUFSIZE, 0);
+                            recvBytes = SSL_read(pSSL2Clnt, transBuf, BUFSIZE);
+                            if (recvBytes > 0)
                             {
-                                printf("from clent: (%d)\n", recv_bytes);
+                                printf("from clent: (%d)\n", recvBytes);
                                 // sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
-                                send_bytes = SSL_write(pSSL2Serv, buffer, recv_bytes);
-                                if (send_bytes < 0)
+                                sendBytes = SSL_write(pSSL2Serv, transBuf, recvBytes);
+                                if (sendBytes < 0)
                                 {
                                     printf("send to server failed\n");
                                     break;
                                 }
                             }
-                            else if (recv_bytes == 0)
+                            else if (recvBytes == 0)
                             {
                                 // 客户端断开连接或出错，从epoll中移除
                                 // epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
                                 // close(events[i].data.fd);
-                                printf("Client disconnected:%d %d\n", recv_bytes, errno);
+                                printf("Client disconnected:%d %d\n", recvBytes, errno);
                                 break;
                             }
                             else
                             {
-                                printf("Client connect error:%d %d\n", recv_bytes, errno);
+                                printf("Client connect error:%d %d\n", recvBytes, errno);
                                 break;
                             }
 #if nonBlockMode
@@ -357,33 +367,33 @@ int main()
                             while (1)
                             {
                                 // from client
-                                //  recv_bytes = recv(events[i].data.fd, buffer, BUFSIZE, 0);
-                                recv_bytes = SSL_read(pSSL2Clnt, buffer, BUFSIZE);
-                                if (recv_bytes > 0)
+                                //  recvBytes = recv(events[i].data.fd, transBuf, BUFSIZE, 0);
+                                recvBytes = SSL_read(pSSL2Clnt, transBuf, BUFSIZE);
+                                if (recvBytes > 0)
                                 {
-                                    printf("from clent: (%d)\n", recv_bytes);
+                                    printf("from clent: (%d)\n", recvBytes);
                                     // sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
                                     // send here
-                                    send_bytes = SSL_write(pSSL2Serv, buffer, recv_bytes);
-                                    if (send_bytes < 0)
+                                    sendBytes = SSL_write(pSSL2Serv, transBuf, recvBytes);
+                                    if (sendBytes < 0)
                                     {
                                         printf("send to server failed\n");
                                         break;
                                     }
                                 }
-                                else if (recv_bytes == 0)
+                                else if (recvBytes == 0)
                                 {
-                                    printf("receive from clent finished:%d %d\n", recv_bytes, errno);
+                                    printf("receive from clent finished:%d %d\n", recvBytes, errno);
                                     break;
                                 }
                                 else
                                 {
-                                    int errn = SSL_get_error(pSSL2Clnt, recv_bytes);
+                                    int errn = SSL_get_error(pSSL2Clnt, recvBytes);
                                     if (errn == SSL_ERROR_WANT_READ || errn == SSL_ERROR_WANT_WRITE)
                                     {
                                         // continue;
                                         // should bind wait event
-                                        printf("receive from clent finished:%d %d\n", recv_bytes, errno);
+                                        printf("receive from clent finished:%d %d\n", recvBytes, errno);
                                         break;
                                     }
                                     else
@@ -402,27 +412,27 @@ int main()
                             while (1)
                             {
                                 // from server
-                                //  recv_bytes = recv(proxySocket2Serv, buffer, BUFSIZE, 0);
-                                recv_bytes = SSL_read(pSSL2Serv, buffer, BUFSIZE);
-                                if (recv_bytes > 0)
+                                //  recvBytes = recv(proxySocket2Serv, transBuf, BUFSIZE, 0);
+                                recvBytes = SSL_read(pSSL2Serv, transBuf, BUFSIZE);
+                                if (recvBytes > 0)
                                 {
-                                    printf("from server: (%d)\n", recv_bytes);
+                                    printf("from server: (%d)\n", recvBytes);
                                     // sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
-                                    send_bytes = SSL_write(pSSL2Clnt, buffer, recv_bytes);
-                                    if (send_bytes < 0)
+                                    sendBytes = SSL_write(pSSL2Clnt, transBuf, recvBytes);
+                                    if (sendBytes < 0)
                                     {
                                         printf("send to client failed\n");
                                         break;
                                     }
                                 }
-                                else if (recv_bytes == 0)
+                                else if (recvBytes == 0)
                                 {
-                                    printf("receive from serv finished:%d %d\n", recv_bytes, errno);
+                                    printf("receive from serv finished:%d %d\n", recvBytes, errno);
                                     break;
                                 }
                                 else
                                 {
-                                    int errn = SSL_get_error(pSSL2Serv, recv_bytes);
+                                    int errn = SSL_get_error(pSSL2Serv, recvBytes);
                                     if (errn == SSL_ERROR_WANT_READ || errn == SSL_ERROR_WANT_WRITE)
                                     {
                                         continue;
@@ -434,41 +444,39 @@ int main()
                                         break;
                                     }
                                 }
-                                // to client
-                                //  send_bytes = send(events[i].data.fd, buffer, recv_bytes, 0);
                             }
-                            // if (recv_bytes == 0)
+                            // if (recvBytes == 0)
                             // {
-                            //     printf("Client disconnected:%d %d\n", recv_bytes, errno);
+                            //     printf("Client disconnected:%d %d\n", recvBytes, errno);
                             //     break;
                             // }
                         }
-                        free(buffer);
+                        // free(transBuf);
                     } while (0);
 
+// #if VIRIFY_SERVER_CA
+
+//                     if (pX509Cert)
+//                     {
+//                         X509_free(pX509Cert);
+//                     }
+// #endif
+//                     if (pSSL2Serv)
+//                     {
+//                         SSL_free(pSSL2Serv);
+//                         pSSL2Serv = NULL;
+//                     }
+                    // if (proxySocket2Serv > 0)
+                    // {
+                    //     close(proxySocket2Serv);
+                    // }
+
+                    // if (pSSL2Clnt)
+                    // {
+                    //     SSL_free(pSSL2Clnt);
+                    //     pSSL2Clnt = NULL;
+                    // }
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
-#if VIRIFY_SERVER_CA
-
-                    if (pX509Cert)
-                    {
-                        X509_free(pX509Cert);
-                    }
-#endif
-                    if (pSSL2Serv)
-                    {
-                        SSL_free(pSSL2Serv);
-                        pSSL2Serv = NULL;
-                    }
-                    if (proxySocket2Serv > 0)
-                    {
-                        close(proxySocket2Serv);
-                    }
-
-                    if (pSSL2Clnt)
-                    {
-                        SSL_free(pSSL2Clnt);
-                        pSSL2Clnt = NULL;
-                    }
                     if (events[i].data.fd > 0)
                     {
                         close(events[i].data.fd);
@@ -479,16 +487,34 @@ int main()
 
     } while (0);
 
-    // if (proxyConn2Clnt > 0) {
-    //     close(proxyConn2Clnt);
-    // }
+#if VIRIFY_SERVER_CA
+
+    if (pX509Cert)
+    {
+        X509_free(pX509Cert);
+    }
+#endif
+    if (pSSL2Serv)
+    {
+        SSL_free(pSSL2Serv);
+        pSSL2Serv = NULL;
+    }
+        if (pSSL2Clnt)
+    {
+        SSL_free(pSSL2Clnt);
+        pSSL2Clnt = NULL;
+    }
+
+    if (proxyConn2Clnt > 0) {
+        close(proxyConn2Clnt);
+    }
     if (proxySocket > 0)
     {
         close(proxySocket);
     }
-    // if (proxySocket2Serv > 0) {
-    //     close(proxySocket2Serv);
-    // }
-    // free(transBuf);
+    if (proxySocket2Serv > 0) {
+        close(proxySocket2Serv);
+    }
+    free(transBuf);
     return 0;
 }
