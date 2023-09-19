@@ -2,6 +2,7 @@
 // epoll -o
 // ssl  -o
 // test nonblock with waiting event
+// clean code
 
 // sudo apt install libssl-dev
 // sudo tcpdump -iany tcp port 4322
@@ -43,7 +44,7 @@ int main()
     /*载入所有ssl算法*/
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD *pMethod = TLSv1_2_method();
+    const SSL_METHOD *pMethod = TLSv1_3_method();
     SSL_CTX *pCtx2Serv = NULL;
     SSL_CTX *pCtx2Clnt = NULL;
     SSL* pSSL2Serv = NULL;

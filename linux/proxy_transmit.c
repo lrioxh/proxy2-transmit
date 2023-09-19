@@ -3,6 +3,7 @@
 // ssl
 // test nonblock wait event
 // select?
+// clean code
 
 // sudo tcpdump -iany tcp port 4322
 
