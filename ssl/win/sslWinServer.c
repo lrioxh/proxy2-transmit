@@ -27,7 +27,7 @@
 
 const char* const certificate_path = "../ca/server.crt";
 const char* const private_key_path = "../ca/server.key";
-const char* const password = "123456";
+// const char* const password = "123456";
 
 int main() {
 
@@ -70,10 +70,10 @@ int main() {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
-#if 1		
-        /*设置私钥的解锁密码*/
-        SSL_CTX_set_default_passwd_cb_userdata(pCtx, password);
-#endif
+// #if 1		
+//         /*设置私钥的解锁密码*/
+//         SSL_CTX_set_default_passwd_cb_userdata(pCtx, password);
+// #endif
         /* 载入用户私钥 */
         if (SSL_CTX_use_PrivateKey_file(pCtx, private_key_path, SSL_FILETYPE_PEM) <= 0)
         {
