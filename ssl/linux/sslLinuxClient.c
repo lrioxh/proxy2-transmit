@@ -20,7 +20,7 @@
 
 #define BACKLOG                 (5)	//��������
 #define BUFSZ                   (10240)
-#define PORT                    (4324)
+#define PORT                    (4322)
 #define VIRIFY_SERVER_CA        (1)
 const char* const sIP = "127.0.0.1";
 // const char* const sIP = "192.168.137.1";

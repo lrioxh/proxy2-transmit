@@ -21,9 +21,9 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#define MAX_EVENTS (10)  // epoll
-#define MAX_RETRY (30) // nonblock 30*2ms
-#define BACKLOG (5)      // 最大监听数
+#define MAX_EVENTS (10) // epoll
+#define MAX_RETRY (30)  // nonblock 30*2ms
+#define BACKLOG (5)     // 最大监听数
 #define BUFSIZE (65536)
 #define PORT2SERV (4321)
 #define PORT2CLNT (4322)
@@ -34,11 +34,101 @@ const char *const pCAPath = "../ssl/ca/ca.crt";
 const char *const certificate_path = "../ssl/ca/proxy.crt";
 const char *const private_key_path = "../ssl/ca/proxy.key";
 
+void SSL_info_callback(const SSL *ssl, int where, int ret)
+{
+    if (where & SSL_CB_HANDSHAKE_START)
+    {
+        printf("SSL handshake started\n");
+    }
+
+    if (where & SSL_CB_HANDSHAKE_DONE)
+    {
+        printf("SSL handshake done\n");
+    }
+
+    if (where & SSL_CB_READ)
+    {
+        printf("SSL READ\n");
+        // char buf[4096];
+        // int len = SSL_read((SSL *)ssl, buf, sizeof(buf));
+        // if (len > 0) {
+        //     // 在这里可以检查是否为 Client Hello 或 Server Hello 报文
+        //     // 对于更复杂的检查可能需要额外的逻辑
+        //     printf("Received %d bytes\n", len);
+        // }
+    }
+}
+void print_hex(const unsigned char *buf, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        printf("%02X", buf[i]);
+    }
+}
+
+void print_tls_handshake_info(const unsigned char *buf, size_t len)
+{
+    // 解析协议版本（5-6 字节）
+    unsigned short protocol_version = (buf[4] << 8) + buf[5];
+    printf("Protocol Version: %04X\n", protocol_version);
+
+    // 解析随机数（7-38 字节）
+    printf("Random: ");
+    print_hex(buf + 6, 32);
+    printf("\n");
+
+    // 解析会话 ID(39+)
+    unsigned char session_id_length = buf[38];
+    if (session_id_length > 0)
+    {
+        printf("Session ID: ");
+        print_hex(buf + 39, session_id_length);
+        printf("\n");
+    }
+
+    // 解析加密套件
+    // unsigned short cipher_suites_length = (buf[38 + session_id_length + 1] << 8) + buf[38 + session_id_length + 2];
+    // printf("Cipher Suites: ");
+    // print_hex(buf + 38 + session_id_length + 3, cipher_suites_length);
+    // printf("\n");
+
+    // // 解析压缩算法
+    // unsigned char compression_methods_length = buf[38 + session_id_length + 3 + cipher_suites_length];
+    // printf("Compression Methods: ");
+    // print_hex(buf + 38 + session_id_length + 3 + cipher_suites_length + 1, compression_methods_length);
+    // printf("\n");
+}
+
+void SSL_msg_callback(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg)
+{
+    if (content_type == 22)
+    { // Handshake message
+        const unsigned char *p = buf;
+
+        if (p[0] == 1)
+        { // Client Hello
+            printf("Received Client Hello:\n");
+            print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 2)
+        { // Server Hello
+            printf("Received Server Hello:\n");
+            print_tls_handshake_info(p, len);
+        }
+    }
+    else if (content_type == 20)
+    {
+        printf("ChangeCipherSpec\n");
+    }
+}
+
 int SSL_CTX_INIT_C2S(SSL_CTX **pCtx2Serv, const SSL_METHOD *pMethod, long timeout)
 {
     /*ssl 2 serv*/
     *pCtx2Serv = SSL_CTX_new(pMethod);
     SSL_CTX_set_timeout(*pCtx2Serv, timeout);
+    SSL_CTX_set_info_callback(*pCtx2Serv, SSL_info_callback);
+    SSL_CTX_set_msg_callback(*pCtx2Serv, SSL_msg_callback);
 #if VIRIFY_SERVER_CA
     /*加载CA证书（对端证书需要用CA证书来验证）*/
     if (SSL_CTX_load_verify_locations(*pCtx2Serv, pCAPath, NULL) != 1)
@@ -58,6 +148,8 @@ int SSL_CTX_INIT_S2C(SSL_CTX **pCtx2Clnt, const SSL_METHOD *pMethod, long timeou
     /*初始化SSL上下文环境变量函数*/
     *pCtx2Clnt = SSL_CTX_new(pMethod);
     SSL_CTX_set_timeout(*pCtx2Clnt, timeout);
+    SSL_CTX_set_info_callback(*pCtx2Clnt, SSL_info_callback);
+    SSL_CTX_set_msg_callback(*pCtx2Clnt, SSL_msg_callback);
 
     if (NULL == *pCtx2Clnt)
     {
@@ -154,9 +246,46 @@ int certVerify(SSL *pSSL)
     return 0;
 }
 
-int handleMsg(char *buf)
+void parse_tls_handshake(SSL *ssl)
 {
-    // printf("%s",buf);
+    SSL_SESSION *session = SSL_get_session(ssl);
+
+    if (session)
+    {
+        printf("Protocol Version: %s\n", SSL_get_version(ssl));
+        printf("Cipher Suite: %s\n", SSL_CIPHER_get_name(SSL_get_current_cipher(ssl)));
+        // printf("Session ID: ");
+        // for (int i = 0; i < session->session_id_length; i++) {
+        //     printf("%02X", session->session_id[i]);
+        // }
+        // printf("\n");
+    }
+}
+
+int handleMsg(unsigned char *buf)
+{
+    unsigned char msg_type = buf[0];
+    if (msg_type == 0x16)
+    { // Handshake message
+        unsigned char handshake_type = buf[5];
+
+        if (handshake_type == 0x01)
+        { // Client Hello
+            printf("Received Client Hello:\n");
+            // 解析Client Hello报文，输出所需字段
+            // 例如：版本号、随机数、会话ID等
+        }
+        else if (handshake_type == 0x02)
+        { // Server Hello
+            printf("Received Server Hello:\n");
+            // 解析Server Hello报文，输出所需字段
+            // 例如：版本号、随机数等
+        }
+    }
+    else
+    {
+        // printf("Received %s\n",buf);
+    }
 }
 
 int SSL_Trans(SSL *pSSL_from, SSL *pSSL_to, char *transBuf)
@@ -166,6 +295,7 @@ int SSL_Trans(SSL *pSSL_from, SSL *pSSL_to, char *transBuf)
     int retryCount = 0;
     int errn = 0;
     int sendBytes = 0;
+    parse_tls_handshake(pSSL_from);
     while (1)
     {
         recvBytes = SSL_read(pSSL_from, transBuf, BUFSIZE);
@@ -284,8 +414,8 @@ int main()
     int transBytes = 0;
     int recvBytes = 0;
     int sendBytes = 0;
-    char *transBuf;
-    transBuf = (char *)malloc(BUFSIZE * sizeof(char));
+    unsigned char *transBuf;
+    transBuf = (unsigned char *)malloc(BUFSIZE * sizeof(char));
     char ipBuf[16] = "192.168.137.1";
     // char ipBuf[16] = "127.0.0.1";
 
@@ -434,6 +564,8 @@ int main()
                             int errn = 0;
                             int retryCount = 0;
                             transBytes = 0;
+                            // transBytes += recv(events[i].data.fd, transBuf, BUFSIZE,0);
+                            // printf("\n%s",transBuf);
                             transBytes += SSL_read(pSSL2Clnt, transBuf, BUFSIZE);
                             if (transBytes > 0)
                             {
@@ -525,5 +657,6 @@ int main()
         close(proxySocket2Serv);
     }
     free(transBuf);
+    EVP_cleanup();
     return 0;
 }
