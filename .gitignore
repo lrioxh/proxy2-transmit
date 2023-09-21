@@ -14,6 +14,7 @@
 *.sln
 *.vcxproj*
 *- 副本*
+*(copy).*
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
