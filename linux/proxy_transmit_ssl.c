@@ -26,7 +26,7 @@
 #define BACKLOG (5)     // 最大监听数
 #define BUFSIZE (65536)
 #define PORT2SERV (4321)
-#define PORT2CLNT (4322)
+#define PORT2CLNT (4323)
 #define nonBlockMode (1)
 #define VIRIFY_SERVER_CA (1)
 
@@ -68,12 +68,17 @@ void print_hex(const unsigned char *buf, size_t len)
 
 void print_tls_handshake_info(const unsigned char *buf, size_t len)
 {
+    // handshake type
+    unsigned char handshake_type = buf[0];
     // 解析协议版本（5-6 字节）
-    unsigned short protocol_version = (buf[4] << 8) + buf[5];
-    printf("Protocol Version: %04X\n", protocol_version);
+    // unsigned short protocol_version = (buf[4] << 8) + buf[5];
+    // printf("Protocol Version: %04X\n", protocol_version);
+    printf(" Protocol Version: ");
+    print_hex(buf + 4, 2);
+    printf("\n");
 
     // 解析随机数（7-38 字节）
-    printf("Random: ");
+    printf(" Random: ");
     print_hex(buf + 6, 32);
     printf("\n");
 
@@ -81,22 +86,34 @@ void print_tls_handshake_info(const unsigned char *buf, size_t len)
     unsigned char session_id_length = buf[38];
     if (session_id_length > 0)
     {
-        printf("Session ID: ");
+        printf(" Session ID: ");
         print_hex(buf + 39, session_id_length);
         printf("\n");
     }
 
     // 解析加密套件
-    // unsigned short cipher_suites_length = (buf[38 + session_id_length + 1] << 8) + buf[38 + session_id_length + 2];
-    // printf("Cipher Suites: ");
-    // print_hex(buf + 38 + session_id_length + 3, cipher_suites_length);
-    // printf("\n");
+    unsigned short cipher_suites_length = 2;
+    unsigned short start_pos = 1;
+    // printf("%d",buf[40]);
+    if (handshake_type == 1)
+    {
+        // printf("%d %d",(buf[38 + session_id_length + 1] << 8),buf[38 + session_id_length + 2]);
+        cipher_suites_length = (buf[38 + session_id_length + 1] << 8) + buf[38 + session_id_length + 2];
+        start_pos = 3;
+    }
+    // print_hex(buf+39,2);
+    printf(" Cipher Suites: ");
+    print_hex(buf + 38 + session_id_length + start_pos, cipher_suites_length);
+    printf("\n");
 
-    // // 解析压缩算法
-    // unsigned char compression_methods_length = buf[38 + session_id_length + 3 + cipher_suites_length];
-    // printf("Compression Methods: ");
-    // print_hex(buf + 38 + session_id_length + 3 + cipher_suites_length + 1, compression_methods_length);
-    // printf("\n");
+    // 解析压缩算法
+    unsigned char compression_methods_length = buf[38 + session_id_length + start_pos + cipher_suites_length];
+    if (compression_methods_length > 0)
+    {
+        printf(" Compression Methods: ");
+        print_hex(buf + 38 + session_id_length + start_pos + cipher_suites_length + 1, compression_methods_length);
+        printf("\n");
+    }
 }
 
 void SSL_msg_callback(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg)
@@ -104,8 +121,12 @@ void SSL_msg_callback(int write_p, int version, int content_type, const void *bu
     if (content_type == 22)
     { // Handshake message
         const unsigned char *p = buf;
-
-        if (p[0] == 1)
+        if (p[0] == 0)
+        { // Client Hello
+            printf("Hello Request\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 1)
         { // Client Hello
             printf("Received Client Hello:\n");
             print_tls_handshake_info(p, len);
@@ -115,10 +136,49 @@ void SSL_msg_callback(int write_p, int version, int content_type, const void *bu
             printf("Received Server Hello:\n");
             print_tls_handshake_info(p, len);
         }
+        else if (p[0] == 11)
+        {
+            printf("Received Certificate:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 12)
+        {
+            printf("Server Key Exchange:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 13)
+        {
+            printf("Certificate Request:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 14)
+        {
+            printf("Server Hello Done:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 135)
+        {
+            printf("Certificate Verify:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 16)
+        {
+            printf("Client Key Exchange:\n");
+            // print_tls_handshake_info(p, len);
+        }
+        else if (p[0] == 20)
+        {
+            printf("Finished\n");
+            // print_tls_handshake_info(p, len);
+        }
     }
     else if (content_type == 20)
     {
         printf("ChangeCipherSpec\n");
+    }
+    else if (content_type == 23)
+    {
+        printf("Application\n");
     }
 }
 
@@ -264,28 +324,28 @@ void parse_tls_handshake(SSL *ssl)
 
 int handleMsg(unsigned char *buf)
 {
-    unsigned char msg_type = buf[0];
-    if (msg_type == 0x16)
-    { // Handshake message
-        unsigned char handshake_type = buf[5];
+    // unsigned char msg_type = buf[0];
+    // if (msg_type == 0x16)
+    // { // Handshake message
+    //     unsigned char handshake_type = buf[5];
 
-        if (handshake_type == 0x01)
-        { // Client Hello
-            printf("Received Client Hello:\n");
-            // 解析Client Hello报文，输出所需字段
-            // 例如：版本号、随机数、会话ID等
-        }
-        else if (handshake_type == 0x02)
-        { // Server Hello
-            printf("Received Server Hello:\n");
-            // 解析Server Hello报文，输出所需字段
-            // 例如：版本号、随机数等
-        }
-    }
-    else
-    {
-        // printf("Received %s\n",buf);
-    }
+    //     if (handshake_type == 0x01)
+    //     { // Client Hello
+    //         printf("Received Client Hello:\n");
+    //         // 解析Client Hello报文，输出所需字段
+    //         // 例如：版本号、随机数、会话ID等
+    //     }
+    //     else if (handshake_type == 0x02)
+    //     { // Server Hello
+    //         printf("Received Server Hello:\n");
+    //         // 解析Server Hello报文，输出所需字段
+    //         // 例如：版本号、随机数等
+    //     }
+    // }
+    // else
+    // {
+    //     // printf("Received %s\n",buf);
+    // }
 }
 
 int SSL_Trans(SSL *pSSL_from, SSL *pSSL_to, char *transBuf)
