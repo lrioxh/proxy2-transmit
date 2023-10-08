@@ -49,13 +49,6 @@ void SSL_info_callback(const SSL *ssl, int where, int ret)
     if (where & SSL_CB_READ)
     {
         printf("SSL READ\n");
-        // char buf[4096];
-        // int len = SSL_read((SSL *)ssl, buf, sizeof(buf));
-        // if (len > 0) {
-        //     // 在这里可以检查是否为 Client Hello 或 Server Hello 报文
-        //     // 对于更复杂的检查可能需要额外的逻辑
-        //     printf("Received %d bytes\n", len);
-        // }
     }
 }
 void print_hex(const unsigned char *buf, size_t len)
@@ -156,7 +149,7 @@ void SSL_msg_callback(int write_p, int version, int content_type, const void *bu
             printf("Server Hello Done:\n");
             // print_tls_handshake_info(p, len);
         }
-        else if (p[0] == 135)
+        else if (p[0] == 15)
         {
             printf("Certificate Verify:\n");
             // print_tls_handshake_info(p, len);
@@ -314,38 +307,11 @@ void parse_tls_handshake(SSL *ssl)
     {
         printf("Protocol Version: %s\n", SSL_get_version(ssl));
         printf("Cipher Suite: %s\n", SSL_CIPHER_get_name(SSL_get_current_cipher(ssl)));
-        // printf("Session ID: ");
-        // for (int i = 0; i < session->session_id_length; i++) {
-        //     printf("%02X", session->session_id[i]);
-        // }
-        // printf("\n");
     }
 }
 
 int handleMsg(unsigned char *buf)
 {
-    // unsigned char msg_type = buf[0];
-    // if (msg_type == 0x16)
-    // { // Handshake message
-    //     unsigned char handshake_type = buf[5];
-
-    //     if (handshake_type == 0x01)
-    //     { // Client Hello
-    //         printf("Received Client Hello:\n");
-    //         // 解析Client Hello报文，输出所需字段
-    //         // 例如：版本号、随机数、会话ID等
-    //     }
-    //     else if (handshake_type == 0x02)
-    //     { // Server Hello
-    //         printf("Received Server Hello:\n");
-    //         // 解析Server Hello报文，输出所需字段
-    //         // 例如：版本号、随机数等
-    //     }
-    // }
-    // else
-    // {
-    //     // printf("Received %s\n",buf);
-    // }
 }
 
 int SSL_Trans(SSL *pSSL_from, SSL *pSSL_to, char *transBuf)
@@ -552,6 +518,7 @@ int main()
                     }
                     //
                     setsockopt(proxyConn2Clnt, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)); // 超时返回-1
+                    // nonBlockFlags = fcntl(proxyConn2Clnt, F_GETFL, 0);
 
                     // 将客户端socket注册到epoll
                     event.events = EPOLLIN;
@@ -568,6 +535,7 @@ int main()
                     // as client to server
                     proxySocket2Serv = -1;
 
+                    do
                     {
                         if (socketInit2Serv(&proxySocket2Serv, ipBuf, &proxyAddr2Serv) != 0)
                         {
@@ -652,6 +620,7 @@ int main()
                                     if (retryCount < MAX_RETRY)
                                     {
                                         retryCount++;
+                                        usleep(1000);
                                         continue;
                                     }
                                     else
@@ -682,9 +651,8 @@ int main()
                             fcntl(proxySocket2Serv, F_SETFL, nonBlockFlagsS & ~O_NONBLOCK);
 #endif
                         }
-                    }
-                    while (0)
-                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
+                    } while (0);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
                     if (events[i].data.fd > 0)
                     {
                         close(events[i].data.fd);
