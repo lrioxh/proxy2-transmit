@@ -17,6 +17,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <openssl/ssl.h>
+#include <openssl/pem.h>
 
 #define MAX_EVENTS (10) // epoll
 #define MAX_RETRY (30)  // nonblock 30*2ms
@@ -25,6 +27,12 @@
 #define PORT2SERV (4321)
 #define PORT2CLNT (4322)
 #define nonBlockMode (1)
+#define GET_2BYTE(buf) (((buf)[0] << 8) | (buf)[1])
+#define GET_3BYTE(buf) (((buf)[0] << 16) | ((buf)[1] << 8) | (buf)[2])
+
+const char *const pCAPath = "../ssl/ca/ca.crt";
+const char *const certificate_path = "../ssl/ca/proxy.crt";
+const char *const private_key_path = "../ssl/ca/proxy.key";
 
 // int main(int argc, char *argv[]) {
 
@@ -34,6 +42,137 @@ void print_hex(const unsigned char *buf, size_t len)
     {
         printf("%02X", buf[i]);
     }
+}
+
+void num_to_byte(size_t num, unsigned char *buffer, size_t buffer_length)
+{
+    for (int i = buffer_length - 1; i >= 0; i--)
+    {
+        buffer[i] = num & 0xFF; // 取最低8位
+        num >>= 8;              // 向右移动8位
+    }
+}
+
+void print_public_key(X509 *cert)
+{
+    EVP_PKEY *pubkey = X509_get_pubkey(cert);
+    if (pubkey)
+    {
+        switch (EVP_PKEY_id(pubkey))
+        {
+        case EVP_PKEY_RSA:
+        {
+            RSA *rsa = EVP_PKEY_get1_RSA(pubkey);
+            if (rsa)
+            {
+                printf("公钥:\n");
+                RSA_print_fp(stdout, rsa, 0);
+            }
+            RSA_free(rsa);
+            break;
+        }
+        default:
+            printf("未知的公钥类型\n");
+        }
+        EVP_PKEY_free(pubkey);
+    }
+}
+
+void print_subject_info(X509 *cert)
+{
+    X509_NAME *subject_name = X509_get_subject_name(cert);
+    if (subject_name)
+    {
+        int nid;
+        char buffer[256];
+
+        // 打印通用名 (Common Name)
+        nid = NID_commonName;
+        X509_NAME_get_text_by_NID(subject_name, nid, buffer, sizeof(buffer));
+        printf("通用名 (Common Name): %s\n", buffer);
+
+        // 打印国家 (C)
+        nid = NID_countryName;
+        X509_NAME_get_text_by_NID(subject_name, nid, buffer, sizeof(buffer));
+        printf("国家 (Country): %s\n", buffer);
+
+        // 打印组织 (O)
+        nid = NID_organizationName;
+        X509_NAME_get_text_by_NID(subject_name, nid, buffer, sizeof(buffer));
+        printf("组织 (Organization): %s\n", buffer);
+
+        // 打印组织单位 (OU)
+        nid = NID_organizationalUnitName;
+        X509_NAME_get_text_by_NID(subject_name, nid, buffer, sizeof(buffer));
+        printf("组织单位 (Organizational Unit): %s\n", buffer);
+
+        // 打印邮箱地址 (Email)
+        nid = NID_pkcs9_emailAddress;
+        X509_NAME_get_text_by_NID(subject_name, nid, buffer, sizeof(buffer));
+        printf("邮箱地址 (Email): %s\n", buffer);
+    }
+}
+
+int cert_exchange(unsigned char *buf, size_t len, size_t len_left)
+{
+    unsigned char *bytes_cert_server = buf + 15;
+    // len-=15;
+    int len_cert_server = len - 15;
+    X509 *cert_server = d2i_X509(NULL, &bytes_cert_server, len_cert_server);
+    // print_public_key(cert_server);
+    // print_subject_info(cert_server);
+
+    FILE *cert_file = NULL;
+    X509 *cert_proxy = NULL;
+    // 打开证书文件
+    cert_file = fopen(certificate_path, "rb");
+    if (!cert_file)
+    {
+        fprintf(stderr, "无法打开证书文件\n");
+        return 1;
+    }
+
+    // 读取证书
+    cert_proxy = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    if (!cert_proxy)
+    {
+        fprintf(stderr, "无法解析证书\n");
+        fclose(cert_file);
+        return 1;
+    }
+
+    // 打印公钥和通用名
+    // print_public_key(cert_proxy);
+    // print_subject_info(cert_proxy);
+
+    // 获取证书的二进制比特流
+    unsigned char *bytes_cert_proxy = NULL;
+    int len_cert_proxy = i2d_X509(cert_proxy, &bytes_cert_proxy);
+    if (len_cert_proxy > 0)
+    {
+        // print_hex(buf+15,len_cert_server);
+        // copy to buf
+        memmove(buf+15 + len_cert_proxy, buf+15 + len_cert_server, len_left + 1);
+        memmove(buf+15, bytes_cert_proxy, len_cert_proxy);
+        // print_hex(buf+15,len_cert_proxy);
+
+        // set buf lenth
+        num_to_byte(len_cert_proxy, buf + 12, 3);
+        num_to_byte(len_cert_proxy + 3, buf + 9, 3);
+        num_to_byte(len_cert_proxy + 6, buf + 6, 3);
+        num_to_byte(len_cert_proxy + 10, buf + 3, 2);
+
+        OPENSSL_free(bytes_cert_proxy);
+    }else{
+        fprintf(stderr, "i2d_X509 调用失败\n");
+    }
+
+    // 关闭资源
+    // free(bytes_cert_proxy);
+    X509_free(cert_proxy);
+    X509_free(cert_server);
+    fclose(cert_file);
+    return len_cert_proxy - len_cert_server;
 }
 
 void print_tls_handshake_info(const unsigned char *buf, size_t len)
@@ -90,73 +229,93 @@ int handleMsg(unsigned char *buf, size_t len)
 {
     // printf("1%s2", buf);
     // print_hex(buf,len);
-    unsigned char content_type = buf[0];
-
-    if (content_type == 22)
-    { // Handshake message
-        const unsigned char *p = buf+5;
-        if (p[0] == 0)
-        { // Client Hello
-            printf("Hello Request\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 1)
-        { // Client Hello
-            printf("Received Client Hello:\n");
-            print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 2)
-        { // Server Hello
-            printf("Received Server Hello:\n");
-            print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 11)
-        {
-            printf("Received Certificate:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 12)
-        {
-            printf("Server Key Exchange:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 13)
-        {
-            printf("Certificate Request:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 14)
-        {
-            printf("Server Hello Done:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 15)
-        {
-            printf("Certificate Verify:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 16)
-        {
-            printf("Client Key Exchange:\n");
-            // print_tls_handshake_info(p, len);
-        }
-        else if (p[0] == 20)
-        {
-            printf("Finished\n");
-            // print_tls_handshake_info(p, len);
-        }
-    }
-    else if (content_type == 20)
+    unsigned char *p = NULL;
+    size_t i = 0;
+    unsigned char content_type = 0;
+    unsigned short content_lenth = 0;
+    while (i < len)
     {
-        printf("ChangeCipherSpec\n");
-    }
-    else if (content_type == 23)
-    {
-        printf("Application\n");
-    }
+        i += content_lenth;
+        p = buf + i;
+        content_type = p[0];
+        content_lenth = GET_2BYTE(p + 3) + 5;
+        // p+=content_lenth;
+        // i += content_lenth;
 
+        if (content_type == 22)
+        { // Handshake message
+            p += 5;
+            // content_lenth-=5;
+            if (p[0] == 0)
+            { // Client Hello
+                printf("Hello Request\n");
+                // print_tls_handshake_info(p, len);
+            }
+            else if (p[0] == 1)
+            { // Client Hello
+                printf("Received Client Hello:\n");
+                print_tls_handshake_info(p, content_lenth - 5);
+            }
+            else if (p[0] == 2)
+            { // Server Hello
+                printf("Received Server Hello:\n");
+                print_tls_handshake_info(p, content_lenth - 5);
+            }
+            else if (p[0] == 11)
+            {
+                // p-=5;
+                printf("Received Certificate:\n");
+                int diff = cert_exchange(p - 5, content_lenth, len - i - content_lenth);
+
+                content_lenth += diff;
+                len += diff;
+            }
+            else if (p[0] == 12)
+            {
+                printf("Server Key Exchange:\n");
+                // print_tls_handshake_info(p, len);
+            }
+            else if (p[0] == 13)
+            {
+                printf("Certificate Request:\n");
+                // print_tls_handshake_info(p, len);
+            }
+            else if (p[0] == 14)
+            {
+                printf("Server Hello Done:\n");
+                // print_tls_handshake_info(p, len);
+            }
+            else if (p[0] == 15)
+            {
+                printf("Certificate Verify:\n");
+                // print_tls_handshake_info(p, len);
+            }
+            else if (p[0] == 16)
+            {
+                printf("Client Key Exchange:\n");
+                // get_AES(p,content_lenth);
+            }
+            else if (p[0] == 20)
+            {
+                printf("Finished\n");
+                // print_tls_handshake_info(p, len);
+            }
+        }
+        else if (content_type == 20)
+        {
+            printf("ChangeCipherSpec\n");
+        }
+        else if (content_type == 21)
+        {
+            printf("Alert\n");
+        }
+        else if (content_type == 23)
+        {
+            printf("Application\n");
+        }
+    }
     // printf("\n");
-    return 0;
+    return len;
 }
 
 int trans(int sock_from, int sock_to, unsigned char *transBuf)
@@ -173,8 +332,8 @@ int trans(int sock_from, int sock_to, unsigned char *transBuf)
             retryCount = 0;
             // sprintf(sendBuf, BUFSIZE, "%s", recvBuf);
             // printf("\n%d ",recvBytes);
-            handleMsg(transBuf, recvBytes);
             totalTransBytes += recvBytes;
+            recvBytes = handleMsg(transBuf, recvBytes);
             // send here
             sendBytes = send(sock_to, transBuf, recvBytes, 0);
             if (sendBytes < 0)
@@ -271,7 +430,10 @@ int main()
     // int sendBytes = 0;
     unsigned char *transBuf;
     transBuf = (unsigned char *)malloc(BUFSIZE * sizeof(char));
-    char ipBuf[16] = "192.168.137.1";
+    // unsigned char *certProxy;
+    // certProxy = (unsigned char *)malloc(2048 * sizeof(char));
+    // char ipBuf[16] = "192.168.137.1";
+    char ipBuf[16] = "127.0.0.1";
 
     // int nonBlockFlags = 0;
     struct timeval timeout;
@@ -381,7 +543,7 @@ int main()
                             {
                                 retryCount = 0;
                                 transBytes += recvBytes;
-                                handleMsg(transBuf, recvBytes);
+                                recvBytes = handleMsg(transBuf, recvBytes);
                                 printf("%s", transBuf);
                                 sendBytes = send(proxySocket2Serv, transBuf, recvBytes, 0);
                                 if (sendBytes < 0)

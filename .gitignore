@@ -14,7 +14,8 @@
 *.sln
 *.vcxproj*
 *- 副本*
-*(copy).*
+*copy*
+# * copy.*
 *test*
 
 # User-specific files (MonoDevelop/Xamarin Studio)

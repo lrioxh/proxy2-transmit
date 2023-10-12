@@ -19,7 +19,7 @@
 #include <openssl/err.h>
 
 #define BACKLOG                 (5)	//��������
-#define BUFSZ                   (10240)
+#define BUFSZ                   (65536)
 #define PORT                    (4322)
 #define VIRIFY_SERVER_CA        (1)
 const char* const sIP = "127.0.0.1";

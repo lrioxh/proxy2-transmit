@@ -22,7 +22,7 @@
 #include <openssl/err.h>
 
 #define BACKLOG                 (5)	//��������
-#define BUFSZ                   (10240)
+#define BUFSZ                   (65536)
 #define PORT                    (4321)
 
 const char* const certificate_path = "../ca/server.crt";
@@ -89,6 +89,7 @@ int main() {
         /*֤����֤*/
         SSL_CTX_set_verify(pCtx, SSL_VERIFY_NONE, NULL);
         SSL_CTX_set_options(pCtx, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+        SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
         SSL_CTX_set_mode(pCtx, SSL_MODE_AUTO_RETRY);
 
 
