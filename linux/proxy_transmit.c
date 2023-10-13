@@ -1,11 +1,14 @@
 // TODO
-// epoll
-// ssl
-// test nonblock wait event
-// select?
 // clean code
+// 1. Get and replace server cert(publicKey)
+// 2. get PMS from client, decrypt, encrypt again using proxy key, 
+//    generate MS and SK
+// 3. calculate MAC
+
+// global var:filePaths; X509* certs;   
 
 // sudo tcpdump -iany tcp port 4322
+// sudo wireshark
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,7 +37,9 @@ const char *const pCAPath = "../ssl/ca/ca.crt";
 const char *const certificate_path = "../ssl/ca/proxy.crt";
 const char *const private_key_path = "../ssl/ca/proxy.key";
 
-// int main(int argc, char *argv[]) {
+X509 *cert_proxy = NULL;
+X509 *cert_server = NULL;
+RSA *rsa = NULL;
 
 void print_hex(const unsigned char *buf, size_t len)
 {
@@ -118,32 +123,12 @@ int cert_exchange(unsigned char *buf, size_t len, size_t len_left)
     unsigned char *bytes_cert_server = buf + 15;
     // len-=15;
     int len_cert_server = len - 15;
-    X509 *cert_server = d2i_X509(NULL, &bytes_cert_server, len_cert_server);
+    cert_server = d2i_X509(NULL, &bytes_cert_server, len_cert_server);
     // print_public_key(cert_server);
-    // print_subject_info(cert_server);
-
-    FILE *cert_file = NULL;
-    X509 *cert_proxy = NULL;
-    // 打开证书文件
-    cert_file = fopen(certificate_path, "rb");
-    if (!cert_file)
-    {
-        fprintf(stderr, "无法打开证书文件\n");
-        return 1;
-    }
-
-    // 读取证书
-    cert_proxy = PEM_read_X509(cert_file, NULL, NULL, NULL);
-    if (!cert_proxy)
-    {
-        fprintf(stderr, "无法解析证书\n");
-        fclose(cert_file);
-        return 1;
-    }
-
+    print_subject_info(cert_server);
     // 打印公钥和通用名
     // print_public_key(cert_proxy);
-    // print_subject_info(cert_proxy);
+    print_subject_info(cert_proxy);
 
     // 获取证书的二进制比特流
     unsigned char *bytes_cert_proxy = NULL;
@@ -152,8 +137,8 @@ int cert_exchange(unsigned char *buf, size_t len, size_t len_left)
     {
         // print_hex(buf+15,len_cert_server);
         // copy to buf
-        memmove(buf+15 + len_cert_proxy, buf+15 + len_cert_server, len_left + 1);
-        memmove(buf+15, bytes_cert_proxy, len_cert_proxy);
+        memmove(buf + 15 + len_cert_proxy, buf + 15 + len_cert_server, len_left + 1);
+        memmove(buf + 15, bytes_cert_proxy, len_cert_proxy);
         // print_hex(buf+15,len_cert_proxy);
 
         // set buf lenth
@@ -163,15 +148,11 @@ int cert_exchange(unsigned char *buf, size_t len, size_t len_left)
         num_to_byte(len_cert_proxy + 10, buf + 3, 2);
 
         OPENSSL_free(bytes_cert_proxy);
-    }else{
+    }
+    else
+    {
         fprintf(stderr, "i2d_X509 调用失败\n");
     }
-
-    // 关闭资源
-    // free(bytes_cert_proxy);
-    X509_free(cert_proxy);
-    X509_free(cert_server);
-    fclose(cert_file);
     return len_cert_proxy - len_cert_server;
 }
 
@@ -225,6 +206,13 @@ void print_tls_handshake_info(const unsigned char *buf, size_t len)
     }
 }
 
+void get_AES(unsigned char *buf, size_t len, size_t len_left)
+{
+
+    print_subject_info(cert_proxy);
+    print_subject_info(cert_server);
+}
+
 int handleMsg(unsigned char *buf, size_t len)
 {
     // printf("1%s2", buf);
@@ -266,6 +254,7 @@ int handleMsg(unsigned char *buf, size_t len)
                 // p-=5;
                 printf("Received Certificate:\n");
                 int diff = cert_exchange(p - 5, content_lenth, len - i - content_lenth);
+                // print_subject_info(cert_proxy);
 
                 content_lenth += diff;
                 len += diff;
@@ -293,7 +282,7 @@ int handleMsg(unsigned char *buf, size_t len)
             else if (p[0] == 16)
             {
                 printf("Client Key Exchange:\n");
-                // get_AES(p,content_lenth);
+                get_AES(p - 5, content_lenth, len - i - content_lenth);
             }
             else if (p[0] == 20)
             {
@@ -414,6 +403,29 @@ int socketInit2Serv(int *fd, char *ip, struct sockaddr_in *pAddr)
     return 0;
 }
 
+int loadCertFile(const char *path)
+{
+    FILE *cert_file = NULL;
+    // 打开证书文件
+    cert_file = fopen(path, "rb");
+    if (!cert_file)
+    {
+        fprintf(stderr, "无法打开证书文件\n");
+        return errno;
+    }
+    // 读取证书
+    cert_proxy = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    if (!cert_proxy)
+    {
+        fprintf(stderr, "无法解析证书\n");
+        fclose(cert_file);
+        return errno;
+    }
+    // print_subject_info(cert_proxy);
+    fclose(cert_file);
+    return 0;
+}
+
 int main()
 {
 
@@ -430,8 +442,6 @@ int main()
     // int sendBytes = 0;
     unsigned char *transBuf;
     transBuf = (unsigned char *)malloc(BUFSIZE * sizeof(char));
-    // unsigned char *certProxy;
-    // certProxy = (unsigned char *)malloc(2048 * sizeof(char));
     // char ipBuf[16] = "192.168.137.1";
     char ipBuf[16] = "127.0.0.1";
 
@@ -446,6 +456,12 @@ int main()
 
     do
     {
+        if ( // load cert
+            loadCertFile(certificate_path) != 0)
+        {
+            break;
+        }
+        // print_subject_info(cert_proxy);
         if ( // init socket to clinent
             socketInit2Clnt(&proxySocket, &proxyAddr, addrSize) != 0)
         {
@@ -621,5 +637,7 @@ int main()
         close(proxySocket2Serv);
     }
     free(transBuf);
+    X509_free(cert_proxy);
+    X509_free(cert_server);
     return 0;
 }
