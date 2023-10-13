@@ -1,11 +1,12 @@
 // TODO
 // clean code
 // 1. Get and replace server cert(publicKey)
-// 2. get PMS from client, decrypt, encrypt again using proxy key, 
+// 2. get PMS from client, decrypt, encrypt again using proxy key,
 //    generate MS and SK
 // 3. calculate MAC
 
-// global var:filePaths; X509* certs;   
+// global var:filePaths; Randoms; X509* certs;
+// to use struct
 
 // sudo tcpdump -iany tcp port 4322
 // sudo wireshark
@@ -39,6 +40,8 @@ const char *const private_key_path = "../ssl/ca/proxy.key";
 
 X509 *cert_proxy = NULL;
 X509 *cert_server = NULL;
+unsigned char *random_server = NULL;
+unsigned char *random_client = NULL;
 RSA *rsa = NULL;
 
 void print_hex(const unsigned char *buf, size_t len)
@@ -206,11 +209,33 @@ void print_tls_handshake_info(const unsigned char *buf, size_t len)
     }
 }
 
-void get_AES(unsigned char *buf, size_t len, size_t len_left)
+void get_AES(unsigned char *buf, size_t len)
 {
+    unsigned char *preMaster_en = buf + 6;
+    int len_preMaster_en = len - 6;
+    RSA *rsa = NULL; // 声明RSA结构体
+    BIO *bio = NULL; // 声明BIO结构体
 
-    print_subject_info(cert_proxy);
-    print_subject_info(cert_server);
+    // 从PEM文件中加载私钥
+    bio = BIO_new_file(private_key_path, "rb");
+    rsa = PEM_read_bio_RSAPrivateKey(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    unsigned char preMaster_de[48] = {0};
+    int result = RSA_private_decrypt(len_preMaster_en, preMaster_en, preMaster_de, rsa, RSA_PKCS1_PADDING);
+    if (result == -1)
+    {
+        // 解密失败
+        printf("解密失败\n");
+    }
+    else
+    {
+        // 解密成功
+        // 解密后的预主密钥存储在decrypted数组中
+        // 这里可以进行后续处理
+        // ...
+        print_hex(preMaster_de,48);
+    }
+    RSA_free(rsa);
 }
 
 int handleMsg(unsigned char *buf, size_t len)
@@ -282,7 +307,8 @@ int handleMsg(unsigned char *buf, size_t len)
             else if (p[0] == 16)
             {
                 printf("Client Key Exchange:\n");
-                get_AES(p - 5, content_lenth, len - i - content_lenth);
+                // fixed length
+                get_AES(p, content_lenth - 5);
             }
             else if (p[0] == 20)
             {
