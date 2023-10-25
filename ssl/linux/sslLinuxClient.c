@@ -26,41 +26,6 @@ const char* const sIP = "127.0.0.1";
 // const char* const sIP = "192.168.137.1";
 const char* const pCAPath = "../ca/ca.crt";
 
-void print_3keys(SSL* ssl){
-    // 获取pre master secret
-    // const unsigned char *pre_master_secret = SSL_get_client_random(ssl);
-
-    // 获取master secret
-    unsigned char master_secret[48]; // 根据TLS规范，master secret的长度为48字节
-    SSL_SESSION *session = SSL_get_session(ssl);
-    SSL_SESSION_get_master_key(session, master_secret, sizeof(master_secret));
-
-    // 获取session key
-    // const EVP_CIPHER *cipher = SSL_get_current_cipher(ssl);
-    // unsigned char session_key[EVP_MAX_KEY_LENGTH];
-    // unsigned char iv[EVP_MAX_IV_LENGTH];
-    // SSL_CIPHER_get_keyiv(cipher, session_key, iv);
-    
-    // 打印密钥
-    // printf("pre master secret:\n");
-    // for(int i = 0; i < 48; i++) {
-    //     printf("%02x ", pre_master_secret[i]);
-    // }
-    // printf("\n");
-
-    printf("master secret:\n");
-    for(int i = 0; i < 48; i++) {
-        printf("%02x ", master_secret[i]);
-    }
-    // printf("\n");
-
-    // printf("session key:\n");
-    // for(int i = 0; i < EVP_CIPHER_key_length(cipher); i++) {
-    //     printf("%02x ", session_key[i]);
-    // }
-    printf("\n");
-}
-
 int main() {
 
     /*SSL���ʼ����һ������ֻ��ʼ��һ�Σ�*/
@@ -97,6 +62,9 @@ int main() {
             break;
 
         }
+        
+        SSL_CTX_set_options(pCtx, SSL_OP_NO_EXTENDED_MASTER_SECRET);//openssl 3.0
+        // SSL_CTX_set_info_callback(pCtx, key_info_callback);
 #if VIRIFY_SERVER_CA
         /*����CA֤�飨�Զ�֤����Ҫ��CA֤������֤��*/
         if (SSL_CTX_load_verify_locations(pCtx, pCAPath, NULL) != 1)
