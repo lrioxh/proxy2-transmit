@@ -22,10 +22,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <openssl/ssl.h>
-#include <openssl/pem.h>
+// #include <openssl/pem.h>
 #include <openssl/kdf.h>
 #include <openssl/sha.h>
 #include <openssl/aes.h>
+// #include <openssl/x509.h>
 
 #define MAX_EVENTS (10) // epoll
 #define MAX_RETRY (30)  // nonblock 30*2ms
@@ -46,7 +47,7 @@ const char *const private_key_path = "../ssl/ca/proxy.key";
 #define RSA_2048_SIZE 256
 #define AES_BITS_LEN 128
 #define TLS_HEAD_LEN 5
-
+typedef unsigned char uint8_t;
 typedef struct
 {
     uint8_t client_write_MAC_key[SHA256_DIGEST_LENGTH];
@@ -59,7 +60,7 @@ typedef struct
 
 typedef struct
 {
-    const EVP_MD *md;
+    EVP_MD *md;
     X509 *cert_proxy;
     X509 *cert_server;
     KEY_block *key_block;
@@ -71,40 +72,49 @@ typedef struct
     uint8_t random_client[SSL3_RANDOM_SIZE];
     uint8_t master_secret[SSL3_MASTER_SECRET_SIZE];
 
-    SHA256_CTX *hash_client;
-    SHA256_CTX *hash_server;
-    HMAC_CTX *mac_client;
-    HMAC_CTX *mac_server;
+    // HMAC_CTX *mac_client;
+    // HMAC_CTX *mac_server;
+    SHA256_CTX hash_client;
+    SHA256_CTX hash_server;
     AES_KEY aes_client;
     AES_KEY aes_server;
 
-} ProxyParams;
-void initProxyParams(ProxyParams *params, EVP_MD *md)
-{
-    params = (ProxyParams *)malloc(sizeof(ProxyParams));
-    params->md = md;
-    params->key_block = (KEY_block *)malloc(sizeof(KEY_block));
-    params->client_HS_buf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
-    params->server_HS_buf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
+    unsigned short version;
 
-    SHA256_Init(params->hash_client);
-    SHA256_Init(params->hash_server);
-    params->mac_client = HMAC_CTX_new();
-    params->mac_server = HMAC_CTX_new();
+} ProxyStates;
+
+ProxyStates *initProxyStates(unsigned short version,EVP_MD *md)
+{
+    ProxyStates *states = (ProxyStates *)malloc(sizeof(ProxyStates));
+    states->version=version;
+    states->md = md;
+    states->cert_proxy = NULL;
+    states->cert_server = NULL;
+    states->key_block = (KEY_block *)malloc(sizeof(KEY_block));
+    states->client_HS_buf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
+    states->server_HS_buf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
+
+    SHA256_Init(&states->hash_client);
+    SHA256_Init(&states->hash_server);
+    // states->mac_client = HMAC_CTX_new();
+    // states->mac_server = HMAC_CTX_new();
+    return states;
 }
-void freeProxyParams(ProxyParams *params)
+void freeProxyStates(ProxyStates *states)
 {
-    free(params->client_HS_buf);
-    free(params->server_HS_buf);
-    free(params->key_block);
-    X509_free(params->cert_proxy);
-    X509_free(params->cert_server);
-    EVP_MD_free(params->md);
+    free(states->client_HS_buf);
+    free(states->server_HS_buf);
+    free(states->key_block);
+    X509_free(states->cert_proxy);
+    X509_free(states->cert_server);
+    EVP_MD_free(states->md);
 
-    OPENSSL_cleanse(params->hash_client, sizeof(SHA256_CTX));
-    OPENSSL_cleanse(params->hash_server, sizeof(SHA256_CTX));
-    HMAC_CTX_free(params->mac_client);
-    HMAC_CTX_free(params->mac_server);
+    OPENSSL_cleanse(&states->hash_client, sizeof(SHA256_CTX));
+    OPENSSL_cleanse(&states->hash_server, sizeof(SHA256_CTX));
+    // HMAC_CTX_free(states->mac_client);
+    // HMAC_CTX_free(states->mac_server);
+
+    free(states);
 }
 
 void print_hex(const uint8_t *buf, size_t len)
@@ -121,47 +131,6 @@ void print_byte(const uint8_t *buf, size_t len)
         printf("%s", buf[i]);
     }
 }
-
-uint8_t *num_to_byte(size_t num, uint8_t *buffer, size_t buffer_length)
-{
-    for (int i = buffer_length - 1; i >= 0; i--)
-    {
-        buffer[i] = num & 0xFF; // 取最低8位
-        num >>= 8;              // 向右移动8位
-    }
-    return buffer;
-}
-uint8_t *gen_TLS_head(uint8_t type, uint16_t ver, uint16_t len, uint8_t *out)
-{
-    // uint8_t out[5] = {0};
-    num_to_byte(type, out, 1);
-    num_to_byte(ver, out + 1, 2);
-    num_to_byte(len, out + 3, 2);
-    return out;
-}
-int aes128_decrypt(uint8_t *in, int len, uint8_t *key, uint8_t *iv, uint8_t *out)
-{
-    if (!in || !key || !out) return 0;
-    AES_KEY aes;
-    if (AES_set_decrypt_key(key, AES_BITS_LEN, &aes) < 0)
-    {
-        return 0;
-    }
-    AES_cbc_encrypt(in, out, len, &aes, iv, AES_DECRYPT);
-    return 1;
-}
-int aes128_encrypt(uint8_t *in, int len, uint8_t *key, uint8_t *iv, uint8_t *out)
-{
-    if (!in || !key || !out) return 0;
-    AES_KEY aes;
-    if (AES_set_encrypt_key(key, AES_BITS_LEN, &aes) < 0)
-    {
-        return 0;
-    }
-    AES_cbc_encrypt(in, out, len, &aes, iv, AES_ENCRYPT);
-    return 1;
-}
-
 void print_public_key(X509 *cert)
 {
     EVP_PKEY *pubkey = X509_get_pubkey(cert);
@@ -219,6 +188,120 @@ void print_subject_info(X509 *cert)
         printf("邮箱地址 (Email): %s\n", buffer);
     }
 }
+uint8_t *num_to_byte(size_t num, uint8_t *buffer, size_t buffer_length)
+{
+    for (int i = buffer_length - 1; i >= 0; i--)
+    {
+        buffer[i] = num & 0xFF; // 取最低8位
+        num >>= 8;              // 向右移动8位
+    }
+    return buffer;
+}
+uint8_t *gen_TLS_head(uint8_t type, uint16_t ver, uint16_t len, uint8_t *out)
+{
+    // uint8_t out[5] = {0};
+    num_to_byte(type, out, 1);
+    num_to_byte(ver, out + 1, 2);
+    num_to_byte(len, out + 3, 2);
+    return out;
+}
+uint8_t *gen_padding(uint8_t len, uint8_t *out)
+{
+    // uint8_t *padding = (uint8_t *)malloc(len + 1);
+    for (uint8_t i = 0; i <= len; i++)
+    {
+        num_to_byte(len, out + i, 1);
+    }
+    return out;
+}
+void hash_HS_before(ProxyStates *states, char *src, size_t len, char orient)
+{
+    if (orient == C2S)
+    {
+        // memmove(states->client_HS_buf + states->client_HS_len, src, len);
+        // states->client_HS_len += len;
+        SHA256_Update(&states->hash_client, src, len);
+    }
+    else
+    {
+        // memmove(states->server_HS_buf + states->server_HS_len, src, len);
+        // states->server_HS_len += len;
+        SHA256_Update(&states->hash_server, src, len);
+    }
+}
+
+void hash_HS_after(ProxyStates *states, uint8_t *src, size_t len, char orient)
+{
+    if (orient == C2S)
+    {
+        // memmove(states->server_HS_buf + states->server_HS_len, src, len);
+        // states->server_HS_len += len;
+        SHA256_Update(&states->hash_server, src, len);
+    }
+    else
+    {
+        // memmove(states->client_HS_buf + states->client_HS_len, src, len);
+        // states->client_HS_len += len;
+        SHA256_Update(&states->hash_client, src, len);
+    }
+}
+
+int aes128_decrypt(AES_KEY *aes, uint8_t *in, uint8_t *out, int len, uint8_t *key, uint8_t *iv)
+{ // TODO:AES_set_*_key in get_keys; encrypt apart
+    if (!in || !key || !out) return 0;
+    // AES_KEY aes;
+    uint8_t iv_cache[AES_BLOCK_SIZE] = {0};
+    memmove(iv_cache, iv, 16);
+    if (AES_set_decrypt_key(key, AES_BITS_LEN, aes) < 0)
+    {
+        return 0;
+    }
+    AES_cbc_encrypt(in, out, len, aes, iv_cache, AES_DECRYPT);
+    return 1;
+}
+int aes128_encrypt(AES_KEY *aes, uint8_t *in, uint8_t *out, int len, uint8_t *key, uint8_t *iv)
+{
+    if (!in || !key || !out) return 0;
+    // AES_KEY aes;
+    uint8_t iv_cache[AES_BLOCK_SIZE] = {0};
+    memmove(iv_cache, iv, 16);
+    if (AES_set_encrypt_key(key, AES_BITS_LEN, aes) < 0)
+    {
+        return 0;
+    }
+    AES_cbc_encrypt(in, out, len, aes, iv_cache, AES_ENCRYPT);
+    return 1;
+}
+
+uint8_t *sha_256(uint8_t *out, const uint8_t *d1, size_t n1, const uint8_t *d2, size_t n2)
+{ // TODO: use SHA256_Update apart
+    SHA256_CTX c;
+    static uint8_t m[SHA256_DIGEST_LENGTH];
+
+    if (out == NULL) out = m;
+    SHA256_Init(&c);
+    SHA256_Update(&c, d1, n1);
+    SHA256_Update(&c, d2, n2);
+    SHA256_Final(out, &c);
+    OPENSSL_cleanse(&c, sizeof(c));
+    return (out);
+}
+
+uint8_t *hmac(EVP_MD *md, uint8_t *out, size_t *out_len, uint8_t *key, size_t key_len, uint8_t *in1,
+              size_t in1_len, uint8_t *in2, size_t in2_len, uint8_t *in3, size_t in3_len,
+              uint8_t *in4, size_t in4_len)
+{ // calculate mac
+    // TODO: use states->mac_client instead of ctx
+    HMAC_CTX *ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx, key, key_len, md, NULL);
+    HMAC_Update(ctx, in1, in1_len);
+    HMAC_Update(ctx, in2, in2_len);
+    HMAC_Update(ctx, in3, in3_len);
+    HMAC_Update(ctx, in4, in4_len);
+    HMAC_Final(ctx, out, out_len);
+    HMAC_CTX_free(ctx);
+    return out;
+}
 
 static int tls12_PRF(const EVP_MD *md, uint8_t *out, size_t out_len, const uint8_t *secret,
                      size_t secret_len, const uint8_t *label, size_t label_len,
@@ -248,17 +331,38 @@ err:
     EVP_PKEY_CTX_free(pctx);
     return ret;
 }
-
-int cert_exchange(ProxyParams *params, char *buf, size_t len, size_t len_left)
+int loadCertFile(ProxyStates *states, const char *path)
+{
+    FILE *cert_file = NULL;
+    // 打开证书文件
+    cert_file = fopen(path, "rb");
+    if (!cert_file)
+    {
+        fprintf(stderr, "无法打开证书文件\n");
+        return errno;
+    }
+    // 读取证书
+    states->cert_proxy = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    if (!states->cert_proxy)
+    {
+        fprintf(stderr, "无法解析证书\n");
+        fclose(cert_file);
+        return errno;
+    }
+    // print_subject_info(cert_proxy);
+    fclose(cert_file);
+    return 0;
+}
+int cert_exchange(ProxyStates *states, char *buf, size_t len, size_t len_left)
 {
     uint8_t *bytes_cert_server = buf + 15;
     // len-=15;
     int len_cert_server = len - 15;
-    params->cert_server = d2i_X509(NULL, &bytes_cert_server, len_cert_server);
+    states->cert_server = d2i_X509(NULL, &bytes_cert_server, len_cert_server);
 
     // 获取证书的二进制比特流
     uint8_t *bytes_cert_proxy = NULL;
-    int len_cert_proxy = i2d_X509(params->cert_proxy, &bytes_cert_proxy);
+    int len_cert_proxy = i2d_X509(states->cert_proxy, &bytes_cert_proxy);
     if (len_cert_proxy > 0)
     {
         // print_hex(buf+15,len_cert_server);
@@ -339,7 +443,7 @@ void prase_handshake(const uint8_t *buf, size_t len, uint8_t *random_key)
         printf("\n");
     }
 }
-int get_keys(ProxyParams *params, char *buf, size_t len, size_t len_left, char orient)
+int get_keys(ProxyStates *states, char *buf, size_t len, size_t len_left, char orient)
 {
     uint8_t *preMaster_en = buf + 11;
     int len_preMaster_en = len - 11;
@@ -367,35 +471,39 @@ int get_keys(ProxyParams *params, char *buf, size_t len, size_t len_left, char o
         printf("pms: ");
         print_hex(preMaster_de, SSL3_MASTER_SECRET_SIZE);
         printf("\n");
-        write_HS_buf_before(params, buf + TLS_HEAD_LEN, 1, orient); // type
-        write_HS_buf_before(params, buf + TLS_HEAD_LEN, 1, orient); // len1
-
-        // const EVP_MD *md = EVP_sha256(); // 哈希函数
+        // hash_HS_before(states, buf + TLS_HEAD_LEN, len - TLS_HEAD_LEN, orient);
 
         uint8_t *encryptedData = NULL;
         encryptedData = (uint8_t *)malloc(RSA_2048_SIZE);
 
         // 计算PRF
-        tls12_PRF(params->md, params->master_secret, SSL3_MASTER_SECRET_SIZE, preMaster_de,
+        tls12_PRF(states->md, states->master_secret, SSL3_MASTER_SECRET_SIZE, preMaster_de,
                   SSL3_MASTER_SECRET_SIZE, TLS_MD_MASTER_SECRET_CONST,
-                  TLS_MD_MASTER_SECRET_CONST_SIZE, params->random_client, SSL3_RANDOM_SIZE,
-                  params->random_server, SSL3_RANDOM_SIZE, NULL, 0);
-        tls12_PRF(params->md, (uint8_t *)(params->key_block), sizeof(KEY_block),
-                  params->master_secret, SSL3_MASTER_SECRET_SIZE, TLS_MD_KEY_EXPANSION_CONST,
-                  TLS_MD_KEY_EXPANSION_CONST_SIZE, params->random_server, SSL3_RANDOM_SIZE,
-                  params->random_client, SSL3_RANDOM_SIZE, NULL, 0);
+                  TLS_MD_MASTER_SECRET_CONST_SIZE, states->random_client, SSL3_RANDOM_SIZE,
+                  states->random_server, SSL3_RANDOM_SIZE, NULL, 0);
+        tls12_PRF(states->md, (uint8_t *)(states->key_block), sizeof(KEY_block),
+                  states->master_secret, SSL3_MASTER_SECRET_SIZE, TLS_MD_KEY_EXPANSION_CONST,
+                  TLS_MD_KEY_EXPANSION_CONST_SIZE, states->random_server, SSL3_RANDOM_SIZE,
+                  states->random_client, SSL3_RANDOM_SIZE, NULL, 0);
         // printf("randoms:\n");
         // print_hex(random_client, 32);
         // printf("\n");
         // print_hex(random_server, 32);
         // printf("\n");
         printf("keys:\n");
-        print_hex(params->master_secret, 48);
+        print_hex(states->master_secret, 48);
         printf("\n");
-        // print_hex((uint8_t *)&key_block, sizeof(key_block));
-        // printf("\n");
+        print_hex(states->key_block->client_write_key, 16);
+        printf("\n");
+        // AES_set_decrypt_key(states->key_block->client_write_key, AES_BITS_LEN,
+        // &states->aes_client); AES_set_decrypt_key(states->key_block->server_write_key,
+        // AES_BITS_LEN, &states->aes_server); HMAC_Init_ex(states->mac_client,
+        // states->key_block->client_write_MAC_key,
+        //              SHA256_DIGEST_LENGTH, states->md, NULL);
+        // HMAC_Init_ex(states->mac_server, states->key_block->server_write_MAC_key,
+        //              SHA256_DIGEST_LENGTH, states->md, NULL);
         // recrypt pms to server
-        EVP_PKEY *pubKey = X509_get_pubkey(params->cert_server);
+        EVP_PKEY *pubKey = X509_get_pubkey(states->cert_server);
         RSA *rsa_servPub = EVP_PKEY_get1_RSA(pubKey);
         int encryptedLength = RSA_public_encrypt(SSL3_MASTER_SECRET_SIZE, preMaster_de,
                                                  encryptedData, rsa_servPub, RSA_PKCS1_PADDING);
@@ -407,95 +515,117 @@ int get_keys(ProxyParams *params, char *buf, size_t len, size_t len_left, char o
             memmove(buf + 11 + encryptedLength, buf + len, len_left);
         }
         memmove(buf + 11, encryptedData, encryptedLength);
+
+        // hash_HS_after(states, buf + TLS_HEAD_LEN, len - TLS_HEAD_LEN, orient);
         free(encryptedData);
         return encryptedLength - len_preMaster_en;
     }
 }
 
-void write_HS_buf_before(ProxyParams *params, char *src, size_t len, char orient)
-{
-    if (orient == C2S)
-    {
-        memmove(params->client_HS_buf + params->client_HS_len, src, len);
-        params->client_HS_len += len;
-    }
-    else
-    {
-        memmove(params->server_HS_buf + params->server_HS_len, src, len);
-        params->server_HS_len += len;
-    }
-}
-
-void write_HS_buf_after(ProxyParams *params, uint8_t *src, size_t len, char orient)
-{
-    if (orient == C2S)
-    {
-        memmove(params->server_HS_buf + params->server_HS_len, src, len);
-        params->server_HS_len += len;
-    }
-    else
-    {
-        memmove(params->client_HS_buf + params->client_HS_len, src, len);
-        params->client_HS_len += len;
-    }
-}
-
-uint8_t *sha_256(uint8_t *out, const uint8_t *d1, size_t n1, const uint8_t *d2, size_t n2)
-{
-    SHA256_CTX c;
-    static uint8_t m[SHA256_DIGEST_LENGTH];
-
-    if (out == NULL) out = m;
-    SHA256_Init(&c);
-    SHA256_Update(&c, d1, n1);
-    SHA256_Update(&c, d2, n2);
-    SHA256_Final(out, &c);
-    OPENSSL_cleanse(&c, sizeof(c));
-    return (out);
-}
-
-uint8_t *hmac(EVP_MD *md, uint8_t *out, size_t *out_len, uint8_t *key, size_t key_len, uint8_t *in1,
-              size_t in1_len, uint8_t *in2, size_t in2_len)
-{
-    HMAC_CTX *ctx = HMAC_CTX_new();
-    HMAC_Init_ex(ctx, key, key_len, md, NULL);
-    HMAC_Update(ctx, in1, in1_len);
-    HMAC_Update(ctx, in2, in2_len);
-    HMAC_Final(ctx, out, out_len);
-    HMAC_CTX_free(ctx);
-    return out;
-}
-
-int reFinish(ProxyParams *params, uint8_t *buf, size_t len, char orient)
+int reFinish(ProxyStates *states, uint8_t *buf, size_t len, char orient)
 {
     // const EVP_MD *md = EVP_sha256();
     // size_t mac_len = len - TLS_HEAD_LEN - AES_BLOCK_SIZE;
-    size_t mac_len = 64;
-    uint8_t *mac = (uint8_t *)malloc(mac_len);
+    size_t verify_len = 12;
+    // uint8_t *finish = (uint8_t *)malloc(32);
+    uint8_t finish[SHA256_DIGEST_LENGTH] = {0};
     uint8_t sha[SHA256_DIGEST_LENGTH] = {0};
+    uint8_t mac_head[13] = {0};
+    uint8_t mac[SHA256_DIGEST_LENGTH] = {0};
+    // uint8_t padding[16] = {0};
+    // uint8_t iv[AES_BLOCK_SIZE] = {0};
+    // memmove(iv, buf + TLS_HEAD_LEN, AES_BLOCK_SIZE);
+    // print_hex(iv,16);
+    // printf("\n");
+    uint8_t encrypted_finish[32] = {0};
+    uint8_t *recved_finish = (uint8_t *)malloc(len - TLS_HEAD_LEN - AES_BLOCK_SIZE);
     if (orient == C2S)
     {
-        // print_hex(params->client_HS_buf, params->client_HS_len);
-        printf("\n");
-        sha_256(sha, params->client_HS_buf, params->client_HS_len, NULL, 0);
-        tls12_PRF(params->md, mac, mac_len, params->master_secret, SSL3_MASTER_SECRET_SIZE,
-                  TLS_MD_CLIENT_FINISH_CONST, TLS_MD_CLIENT_FINISH_CONST_SIZE, sha,
-                  SHA256_DIGEST_LENGTH, NULL, 0, NULL, 0);
+        SHA256_Final(sha, &states->hash_client);
+        tls12_PRF(states->md, finish + 4, verify_len, states->master_secret,
+                  SSL3_MASTER_SECRET_SIZE, TLS_MD_CLIENT_FINISH_CONST,
+                  TLS_MD_CLIENT_FINISH_CONST_SIZE, sha, SHA256_DIGEST_LENGTH, NULL, 0, NULL, 0);
+        // AES_cbc_encrypt(buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, recved_finish,
+        //                 len - TLS_HEAD_LEN - AES_BLOCK_SIZE, &states->aes_client, iv,
+        //                 AES_DECRYPT);
+        aes128_decrypt(&states->aes_client, buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, recved_finish,
+                       len - TLS_HEAD_LEN - AES_BLOCK_SIZE, states->key_block->client_write_key,
+                       buf + TLS_HEAD_LEN);
     }
     else
     {
-        sha_256(sha, params->server_HS_buf, params->server_HS_len, NULL, 0);
-        tls12_PRF(params->md, mac, mac_len, params->master_secret, SSL3_MASTER_SECRET_SIZE,
-                  TLS_MD_SERVER_FINISH_CONST, TLS_MD_SERVER_FINISH_CONST_SIZE, sha,
-                  SHA256_DIGEST_LENGTH, NULL, 0, NULL, 0);
+        SHA256_Final(sha, &states->hash_server);
+        tls12_PRF(states->md, finish + 4, verify_len, states->master_secret,
+                  SSL3_MASTER_SECRET_SIZE, TLS_MD_SERVER_FINISH_CONST,
+                  TLS_MD_SERVER_FINISH_CONST_SIZE, sha, SHA256_DIGEST_LENGTH, NULL, 0, NULL, 0);
     }
-    print_hex(mac, mac_len);
+
+    print_hex(recved_finish, len - TLS_HEAD_LEN - AES_BLOCK_SIZE);
     printf("\n");
+    print_hex(buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, len - TLS_HEAD_LEN - AES_BLOCK_SIZE);
+    printf("\n");
+
+    num_to_byte(SSL3_MT_FINISHED, finish, 1);
+    num_to_byte(verify_len, finish + 1, 3);
+    num_to_byte(0, mac_head, 8);
+    gen_TLS_head(SSL3_RT_HANDSHAKE, states->version, 16, mac_head + 8);
+    gen_padding(15, finish + 16);
+    // gen_padding(15, finish + 16);
+    print_hex(mac_head, 13);
+    printf("\n");
+    print_hex(finish, 32);
+    // printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, 16, finish, 32, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), NULL, 0, finish, 32, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, 16, finish, 16, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), NULL, 0, finish, 16, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+
+    // AES_cbc_encrypt(finish, encrypted_finish, 32, &states->aes_client, iv, AES_ENCRYPT);
+    aes128_encrypt(&states->aes_client, finish, encrypted_finish, 32,
+                   states->key_block->client_write_key, buf + TLS_HEAD_LEN);
+    print_hex(encrypted_finish, SHA256_DIGEST_LENGTH);
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, 16, encrypted_finish,
+         32, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), NULL, 0, encrypted_finish, 32, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), buf + TLS_HEAD_LEN + AES_BLOCK_SIZE, 16, encrypted_finish,
+         16, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    hmac(states->md, mac, NULL, states->key_block->client_write_MAC_key, SHA256_DIGEST_LENGTH,
+         mac_head, sizeof(mac_head), NULL, 0, encrypted_finish, 16, NULL, 0);
+    print_hex(mac, SHA256_DIGEST_LENGTH);
+    printf("\n");
+    // AES_cbc_encrypt(encrypted_finish, finish, 32, &states->aes_client, iv, AES_DECRYPT);
+    // aes128_decrypt(&states->aes_client, encrypted_finish, finish, 32,
+    //                states->key_block->client_write_key, buf + TLS_HEAD_LEN);
+    // print_hex(finish, SHA256_DIGEST_LENGTH);
+    // printf("\n");
+
     // memmove(buf + 11, mac, encryptedLength);
-    free(mac);
+    // free(finish);
+    free(recved_finish);
 }
 
-int handleMsg(ProxyParams *params, char *buf, size_t len, char orient)
+int handleMsg(ProxyStates *states, char *buf, size_t len, char orient)
 {
     uint8_t *p = NULL;
     size_t i = 0;
@@ -509,51 +639,32 @@ int handleMsg(ProxyParams *params, char *buf, size_t len, char orient)
         content_type = p[0];
         content_lenth = GET_2BYTE(p + 3) + TLS_HEAD_LEN;
 
-        if (content_type == 22)
+        if (content_type == SSL3_RT_HANDSHAKE)
         { // Handshake message
             // ommit
-            if (p[TLS_HEAD_LEN] == 0)
+            if (p[TLS_HEAD_LEN] == SSL3_MT_HELLO_REQUEST)
             {
                 printf("Hello Request\n");
                 goto nextContent;
             }
-
-            // encrypt
-            // write_HS_buf_before(p + TLS_HEAD_LEN, content_lenth -
-            // TLS_HEAD_LEN,
-            //                     orient);
-            if (p[TLS_HEAD_LEN] == 16)
-            {
-                printf("Client Key Exchange:\n");
-                diff = get_keys(params, p, content_lenth, len - i - content_lenth, orient);
-
-                content_lenth += diff;
-                len += diff;
-                goto nextContent;
-            }
-            else if (p[TLS_HEAD_LEN] == 20 || finished == 20)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_FINISHED || finished == SSL3_MT_FINISHED)
             {
                 printf("Finished\n");
                 // print_hex(p, content_lenth);
                 // printf("\n");
-                reFinish(params, p, content_lenth, orient);
-                uint8_t *out = (uint8_t *)malloc(content_lenth - TLS_HEAD_LEN - AES_BLOCK_SIZE);
+                reFinish(states, p, content_lenth, orient);
                 // out=(uint8_t*)malloc(content_lenth-
                 // TLS_HEAD_LEN-AES_BLOCK_SIZE);
                 if (orient == C2S)
                 {
-                    char iv[AES_BLOCK_SIZE] = {0};
-                    memmove(iv, p + TLS_HEAD_LEN, AES_BLOCK_SIZE);
+                    // char iv[AES_BLOCK_SIZE] = {0};
+                    // memmove(iv, p + TLS_HEAD_LEN, AES_BLOCK_SIZE);
 
                     // print_hex((uint8_t *)&key_block.client_write_key,
                     //           sizeof(key_block.client_write_key));
-                    aes128_decrypt(p + TLS_HEAD_LEN + AES_BLOCK_SIZE,
-                                   content_lenth - TLS_HEAD_LEN - AES_BLOCK_SIZE,
-                                   params->key_block->client_write_key, iv, out);
-
-                    print_hex(out, content_lenth - TLS_HEAD_LEN - AES_BLOCK_SIZE);
-                    printf("\n");
-                    free(out);
+                    // aes128_decrypt(p + TLS_HEAD_LEN + AES_BLOCK_SIZE,
+                    //                content_lenth - TLS_HEAD_LEN - AES_BLOCK_SIZE,
+                    //                states->key_block->client_write_key, iv, out);
                 }
                 else
                 {
@@ -563,64 +674,78 @@ int handleMsg(ProxyParams *params, char *buf, size_t len, char orient)
                     //                 key_block.server_write_IV, AES_DECRYPT);
                 }
                 finished = 0;
+                // hash_HS_after(states, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN,
+                // orient);
                 goto nextContent;
             }
 
+            // encrypt
+            hash_HS_before(states, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN, orient);
+
+            if (p[TLS_HEAD_LEN] == SSL3_MT_CLIENT_KEY_EXCHANGE)
+            {
+                printf("Client Key Exchange:\n");
+                diff = get_keys(states, p, content_lenth, len - i - content_lenth, orient);
+
+                content_lenth += diff;
+                len += diff;
+                // goto nextContent;
+            }
             // plaintext
-            write_HS_buf_before(params, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN, orient);
-            if (p[TLS_HEAD_LEN] == 1)
+            // hash_HS_before(states, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN, orient);
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_CLIENT_HELLO)
             { // Client Hello
                 printf("Client Hello:\n");
                 prase_handshake(p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN,
-                                params->random_client);
+                                states->random_client);
             }
-            else if (p[TLS_HEAD_LEN] == 2)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_SERVER_HELLO)
             { // Server Hello
                 printf("Server Hello:\n");
                 prase_handshake(p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN,
-                                params->random_server);
+                                states->random_server);
             }
-            else if (p[TLS_HEAD_LEN] == 4)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_NEWSESSION_TICKET)
             {
                 printf("New Session Ticket:\n");
             }
-            else if (p[TLS_HEAD_LEN] == 11)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_CERTIFICATE)
             {
                 printf("Certificate:\n");
 
-                diff = cert_exchange(params, p, content_lenth, len - i - content_lenth);
+                diff = cert_exchange(states, p, content_lenth, len - i - content_lenth);
                 content_lenth += diff;
                 len += diff;
             }
-            else if (p[TLS_HEAD_LEN] == 12)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_SERVER_KEY_EXCHANGE)
             {
                 printf("Server Key Exchange:\n");
             }
-            else if (p[TLS_HEAD_LEN] == 13)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_CERTIFICATE_REQUEST)
             {
                 printf("Certificate Request:\n");
             }
-            else if (p[TLS_HEAD_LEN] == 14)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_SERVER_DONE)
             {
                 printf("Server Hello Done:\n");
             }
-            else if (p[TLS_HEAD_LEN] == 15)
+            else if (p[TLS_HEAD_LEN] == SSL3_MT_CERTIFICATE_VERIFY)
             {
                 printf("Certificate Verify:\n");
             }
 
-            write_HS_buf_after(params, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN, orient);
+            hash_HS_after(states, p + TLS_HEAD_LEN, content_lenth - TLS_HEAD_LEN, orient);
         }
-        else if (content_type == 20)
+        else if (content_type == SSL3_RT_CHANGE_CIPHER_SPEC)
         {
             printf("ChangeCipherSpec\n");
             finished = 20;
         }
-        else if (content_type == 21)
+        else if (content_type == SSL3_RT_ALERT)
         {
             printf("Alert\n");
         }
-        else if (content_type == 23)
+        else if (content_type == SSL3_RT_APPLICATION_DATA)
         {
             printf("Application\n");
         }
@@ -630,7 +755,7 @@ int handleMsg(ProxyParams *params, char *buf, size_t len, char orient)
     return len;
 }
 
-int trans(ProxyParams *params, int sock_from, int sock_to, uint8_t *transBuf, char orient)
+int trans(ProxyStates *states, int sock_from, int sock_to, uint8_t *transBuf, char orient)
 {
     int recvBytes = 0;
     int totalTransBytes = 0;
@@ -643,7 +768,7 @@ int trans(ProxyParams *params, int sock_from, int sock_to, uint8_t *transBuf, ch
         {
             retryCount = 0;
             totalTransBytes += recvBytes;
-            recvBytes = handleMsg(params, transBuf, recvBytes, orient);
+            recvBytes = handleMsg(states, transBuf, recvBytes, orient);
             // send here
             sendBytes = send(sock_to, transBuf, recvBytes, 0);
             if (sendBytes < 0)
@@ -724,29 +849,6 @@ int socketInit2Serv(int *fd, char *ip, struct sockaddr_in *pAddr)
     return 0;
 }
 
-int loadCertFile(ProxyParams *params, const char *path)
-{
-    FILE *cert_file = NULL;
-    // 打开证书文件
-    cert_file = fopen(path, "rb");
-    if (!cert_file)
-    {
-        fprintf(stderr, "无法打开证书文件\n");
-        return errno;
-    }
-    // 读取证书
-    params->cert_proxy = PEM_read_X509(cert_file, NULL, NULL, NULL);
-    if (!params->cert_proxy)
-    {
-        fprintf(stderr, "无法解析证书\n");
-        fclose(cert_file);
-        return errno;
-    }
-    // print_subject_info(cert_proxy);
-    fclose(cert_file);
-    return 0;
-}
-
 int main()
 {
     int proxySocket = -1;
@@ -757,11 +859,9 @@ int main()
     int proxySocket2Serv = -1;
     struct sockaddr_in proxyAddr2Serv = {0};
 
-    ProxyParams *params = NULL;
-    initProxyParams(params, EVP_sha256());
+    ProxyStates *states = initProxyStates(TLS1_2_VERSION,EVP_sha256());
 
-    uint8_t *transBuf;
-    transBuf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
+    uint8_t *transBuf = (uint8_t *)malloc(BUFSIZE * sizeof(char));
     // char ipBuf[16] = "192.168.137.1";
     char ipBuf[16] = "127.0.0.1";
 
@@ -777,7 +877,7 @@ int main()
     do
     {
         if ( // load cert
-            loadCertFile(params, certificate_path) != 0)
+            loadCertFile(states, certificate_path) != 0)
         {
             break;
         }
@@ -882,7 +982,7 @@ int main()
                             {
                                 retryCount = 0;
                                 transBytes += recvBytes;
-                                recvBytes = handleMsg(params, transBuf, recvBytes, C2S);
+                                recvBytes = handleMsg(states, transBuf, recvBytes, C2S);
                                 printf("%s", transBuf);
                                 sendBytes = send(proxySocket2Serv, transBuf, recvBytes, 0);
                                 if (sendBytes < 0)
@@ -922,7 +1022,7 @@ int main()
                             fcntl(events[i].data.fd, F_SETFL, nonBlockFlagsC | O_NONBLOCK);
 #endif
                             transBytes +=
-                                trans(params, events[i].data.fd, proxySocket2Serv, transBuf, C2S);
+                                trans(states, events[i].data.fd, proxySocket2Serv, transBuf, C2S);
                             printf("Recv:(%d)\n", transBytes);
 #if nonBlockMode
                             fcntl(events[i].data.fd, F_SETFL, nonBlockFlagsC & ~O_NONBLOCK);
@@ -930,7 +1030,7 @@ int main()
 #endif
                             transBytes = 0;
                             transBytes +=
-                                trans(params, proxySocket2Serv, events[i].data.fd, transBuf, S2C);
+                                trans(states, proxySocket2Serv, events[i].data.fd, transBuf, S2C);
                             printf("Recv:(%d)\n", transBytes);
 #if nonBlockMode
                             fcntl(proxySocket2Serv, F_SETFL, nonBlockFlagsS & ~O_NONBLOCK);
@@ -961,7 +1061,7 @@ int main()
         close(proxySocket2Serv);
     }
     free(transBuf);
-    freeProxyParams(params);
-    free(params);
+    freeProxyStates(states);
+    free(states);
     return 0;
 }
