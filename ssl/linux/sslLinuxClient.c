@@ -25,7 +25,17 @@
 const char* const sIP = "127.0.0.1";
 // const char* const sIP = "192.168.137.1";
 const char* const pCAPath = "../ca/ca.crt";
-
+void print_hex(const uint8_t *buf, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        if (i % 16 == 0)
+        {
+            printf(" ");
+        }
+        printf("%02X", buf[i]);
+    }
+}
 int main() {
 
     /*SSL���ʼ����һ������ֻ��ʼ��һ�Σ�*/
@@ -154,6 +164,11 @@ int main() {
         X509_NAME_get_text_by_NID(pX509Subject, NID_commonName, szBuf, sizeof(szBuf) - 1);
         printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif		
+        uint8_t cache[10240]={0};
+        size_t cache_len=0;
+        SSL_SESSION *ss= SSL_get_session(pSSL);
+        SSL_SESSION_get0_ticket_appdata(ss,&cache,&cache_len);
+        // print_hex(ss->ticket_appdata,ss->ticket_appdata_len);
 
         printf("Type 'quit' to exit\n");
 
@@ -178,6 +193,7 @@ int main() {
             //recv(clientSocket, buffer, BUFSZ, 0);
             SSL_read(pSSL, buffer, BUFSZ);
             printf("Server response: %s\n", buffer);
+            SSL_SESSION_get0_ticket_appdata(ss,&cache,&cache_len);
         }
         SSL_shutdown(pSSL);
 
