@@ -7,13 +7,21 @@
 文件结构：
 
 > ├─linux	//linux代理 socket&ssl
+>
 > │  └─proxy_transmit.c	//main 
+>
 > ├─server-flask	//flask测试服务器
+>
 > ├─socketOnlyVer	//老版本win&linux socket代理
+>
 > ├─ssl
+>
 > │  ├─ca	//ca files
+>
 > │  ├─linux	//ssl C&S for linux 
+>
 > │  └─win	//ssl C&S for win
+>
 > └─win	//老版本win代理 socket&ssl
 
 协议栈：
