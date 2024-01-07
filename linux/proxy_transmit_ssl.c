@@ -26,7 +26,7 @@
 #define BACKLOG (5)     // 最大监听数
 #define BUFSIZE (65536)
 #define PORT2SERV (4321)
-#define PORT2CLNT (4323)
+#define PORT2CLNT (4322)
 #define nonBlockMode (1)
 #define VIRIFY_SERVER_CA (1)
 
@@ -163,6 +163,8 @@ void SSL_msg_callback(int write_p, int version, int content_type, const void *bu
         {
             printf("Finished\n");
             // print_tls_handshake_info(p, len);
+            // unsigned short record_len = (p[3] << 8) | p[4];
+            print_hex(p,len);
         }
     }
     else if (content_type == 20)
@@ -442,8 +444,8 @@ int main()
     int sendBytes = 0;
     unsigned char *transBuf;
     transBuf = (unsigned char *)malloc(BUFSIZE * sizeof(char));
-    char ipBuf[16] = "192.168.137.1";
-    // char ipBuf[16] = "127.0.0.1";
+    // char ipBuf[16] = "192.168.137.1";
+    char ipBuf[16] = "127.0.0.1";
 
     struct timeval timeout;
     timeout.tv_sec = 1; // 设置超时为1秒

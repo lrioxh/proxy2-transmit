@@ -30,13 +30,8 @@ const char* const private_key_path = "../ca/server.key";
 // const char* const password = "123456";
 
 int main() {
-
-
-    /*SSL���ʼ����һ������ֻ��ʼ��һ�Σ�*/
     SSL_library_init();
-    /*��������ssl������Ϣ*/
     SSL_load_error_strings();
-    /*��������ssl�㷨*/
     OpenSSL_add_all_algorithms();
 
     const SSL_METHOD* pMethod = TLSv1_2_method();
@@ -53,7 +48,6 @@ int main() {
     buffer = (char*)malloc(BUFSZ * sizeof(char));
 
     do {
-        /*��ʼ��SSL�����Ļ�����������*/
         pCtx = SSL_CTX_new(pMethod);
 
         if (NULL == pCtx)
@@ -62,96 +56,73 @@ int main() {
             break;
         }
 
-        /* �����û�������֤�飬 ��֤���������͸��ͻ��ˡ� ֤��������й�Կ */
         if (SSL_CTX_use_certificate_file(pCtx, certificate_path, SSL_FILETYPE_PEM) <= 0)
         {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
-// #if 1		
-//         /*����˽Կ�Ľ�������*/
-//         SSL_CTX_set_default_passwd_cb_userdata(pCtx, password);
-// #endif
-        /* �����û�˽Կ */
+
         if (SSL_CTX_use_PrivateKey_file(pCtx, private_key_path, SSL_FILETYPE_PEM) <= 0)
         {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
 
-        /* ����û�˽Կ�Ƿ���ȷ */
         if (SSL_CTX_check_private_key(pCtx) <= 0)
         {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
-
-        /*֤����֤*/
+        SSL_CTX_set_timeout(pCtx, 600);
         SSL_CTX_set_verify(pCtx, SSL_VERIFY_NONE, NULL);
         SSL_CTX_set_options(pCtx, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-        SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
+        SSL_CTX_set_session_cache_mode(pCtx, SSL_SESS_CACHE_OFF);
+        SSL_CTX_set_cipher_list(pCtx, "ECDHE-RSA-AES128-GCM-SHA256");
+        // SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
         SSL_CTX_set_mode(pCtx, SSL_MODE_AUTO_RETRY);
 
-
-        // ����������socket
+        //socket
         serverSocket = socket(AF_INET, SOCK_STREAM, 0);
         if (serverSocket == -1) {
             printf("%s %d Socket creation error=%d\n", __func__, __LINE__, errno);
             break;
         }
-
-        // ���÷�������ַ�ṹ
         serverAddr.sin_family = AF_INET;
         serverAddr.sin_addr.s_addr = INADDR_ANY;
-        serverAddr.sin_port = htons(PORT);  // ѡ��һ�����ʵĶ˿�
+        serverAddr.sin_port = htons(PORT); 
 
-        // ��socket����������ַ
         if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
             printf("%s %d Binding error=%d\n", __func__, __LINE__, errno);
             break;
         }
-
-        // ������������
         if (listen(serverSocket, BACKLOG) == -1) {
             printf("%s %d Listening error=%d\n", __func__, __LINE__, errno);
             break;
         }
-
-        
-
         while (1) {
-            // ���ܿͻ�������
             printf("Server listening...\n");
             clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &addrLen);
             if (clientSocket == -1) {
                 perror("Accepting connection failed");
                 continue;
             }
-
             printf("Client connected\n");
 
-            /*����pCtx����һ���µ�ssl*/
             pSSL = SSL_new(pCtx);
             if (NULL == pSSL)
             {
                 printf("%s %d error=%d\n", __func__, __LINE__, errno);
                 continue;
             }
-            /*�����ӵ�socket���뵽ssl*/
             SSL_set_fd(pSSL, clientSocket);
-            
-            /*����ssl���ӣ����֣�*/
             if (iRet=SSL_accept(pSSL) <= 0)
             {
                 printf("%s %d iRet=%d %s\n", __func__, __LINE__, iRet, ERR_error_string(SSL_get_error(pSSL, iRet), NULL));
                 continue;
             }
-
-            // ����ͨ��
             while (1) {
 
                 memset(buffer, '\0', BUFSZ);
-
                 //bytesRead = recv(clientSocket, buffer, BUFSZ, 0);
                 bytesRead = SSL_read(pSSL, buffer, BUFSZ);
                 if (bytesRead <= 0) {
@@ -160,30 +131,23 @@ int main() {
                     break;
                 }
                 printf("server recv text :%s \n", buffer);
-                // ����Ƿ�Ϊ�ر���Ϣ
                 if (strncmp(buffer, "quit", 4) == 0) {
                     printf("Client sent quit message\n");
-                    // ������Խ���һЩ����������Ȼ��ر�����
                 //    closesocket(clientSocket);
                     break;
                 }
-                // �����ﴦ�����յ������ݣ�Ȼ����Ҫ���ͻؿͻ��˵���Ӧ
                 //sprintf(buffer, "%s-server", buffer);
                 sprintf(buffer + strlen(buffer) - 1, "-server");
                 //send(clientSocket, buffer, bytesRead + strlen("-server"), 0);
                 SSL_write(pSSL, buffer, strlen(buffer));
 
             }
-            /*�ر�ssl����*/
             SSL_shutdown(pSSL);
             close(clientSocket);
         }
-
     } while (0);
-
     
     close(serverSocket);
-    // WSACleanup();//�ͷ���Դ�Ĳ���
     free(buffer);
     return 0;
 }

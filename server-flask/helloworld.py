@@ -7,7 +7,13 @@ app = Flask(__name__,template_folder="templates")
 app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(),'server-flask/file_archive')
 app.config['CA_FOLDER'] = os.path.join(os.getcwd(),'ssl/ca')
 import ssl
-context = ssl.SSLContext()
+context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+# 设置协议版本
+context.minimum_version = ssl.TLSVersion.TLSv1_2
+context.maximum_version = ssl.TLSVersion.TLSv1_2
+# 指定加密套件
+context.set_ciphers('ECDHE-RSA-AES128-GCM-SHA256')
+# context.set_ciphers('AES128-CBC-SHA')
 context.load_cert_chain(f"{app.config['CA_FOLDER']}/server.crt", f"{app.config['CA_FOLDER']}/server.key")
 
 access_counts = {}
