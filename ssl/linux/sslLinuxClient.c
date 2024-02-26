@@ -19,11 +19,23 @@
 
 #define BACKLOG (5)
 #define BUFSZ (65536)
-#define PORT (4322)
+#define PORT (4324)
 #define VIRIFY_SERVER_CA (1)
 const char *const sIP = "127.0.0.1";
 // const char* const sIP = "192.168.137.1";
 const char *const pCAPath = "../ca/ca.crt";
+
+void Keylog_cb_func(const SSL *ssl, const char *line){
+    FILE  * fp;
+    fp = fopen("/home/rio/Documents/huawei/code/server/proxy2-transmit/ssl/linux/openssl.log", "a");
+    if (fp == NULL)
+    {
+        printf("Failed to create log file\n");
+    }
+    fprintf(fp, "%s\n", line);
+    fclose(fp);
+}
+
 void print_hex(const uint8_t *buf, size_t len)
 {
     for (size_t i = 0; i < len; i++)
@@ -37,9 +49,9 @@ void print_hex(const uint8_t *buf, size_t len)
 }
 
 
-void saveSessionTicket(const SSL *ssl) {
-    SSL_SESSION *session = SSL_get_session(ssl);
-    if (session) {
+void saveSessionTicket(SSL *ssl) {
+    SSL_SESSION *session = SSL_get1_session(ssl);
+    if (session != NULL && SSL_SESSION_is_resumable(session)) {
 
         FILE *file = fopen("session_ticket.bin", "wb");
         if (file) {
@@ -47,6 +59,8 @@ void saveSessionTicket(const SSL *ssl) {
             fclose(file);
         }
     // SSL_SESSION_free(session);
+    }else{
+        printf("sess not resumable\n");
     }
 }
 
@@ -77,7 +91,6 @@ SSL *useSessionTicket(SSL_CTX *ctx)
     fclose(file);
     if (session)
     {
-
         // 判断Session Ticket是否过期
         time_t now = time(NULL);
         time_t session_time = SSL_SESSION_get_time(session);
@@ -107,7 +120,7 @@ int main()
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD *pMethod = TLSv1_2_method();
+    const SSL_METHOD *pMethod = TLS_method();
     SSL_CTX *pCtx = NULL;
     SSL *pSSL = NULL;
 
@@ -132,9 +145,24 @@ int main()
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
             break;
         }
-
+        // EVP_PKEY_X25519
+        // SSL_CTX_set1_curves_list(pCtx, "secp256r1");
+        // SSL_CTX_set1_curves_list(pCtx, "X448");
+        // EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime_field);
+        // SSL_CTX_set_tmp_ecdh(pCtx, ecdh);
+        // EC_KEY_free(ecdh);
+        
+        // SSL_CTX_set_options(pCtx, SSL_OP_NO_TLSv1_3);
         // SSL_CTX_set_options(pCtx, SSL_OP_NO_EXTENDED_MASTER_SECRET);//openssl 3.0
-        // SSL_CTX_set_info_callback(pCtx, key_info_callback);
+        // SSL_CTX_set_options(pCtx, SSLOPEC);
+        SSL_CTX_set_block_padding(pCtx,3);
+        // SSL_CTX_set_ecdh_auto(pCtx, 1);
+        SSL_CTX_set_ciphersuites(pCtx,"TLS_AES_128_GCM_SHA256");
+        // SSL_CTX_set_cipher_list(pCtx, "ECDHE-RSA-AES128-GCM-SHA256");
+        // SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
+        // SSL_CTX_add_client_custom_ext(pCtx, TLSEXT_TYPE_signed_certificate_timestamp, NULL, NULL, NULL, NULL, NULL);
+        
+        // SSL_CTX_set_keylog_callback(pCtx,Keylog_cb_func);
 #if VIRIFY_SERVER_CA
         if (SSL_CTX_load_verify_locations(pCtx, pCAPath, NULL) != 1)
         {
@@ -162,6 +190,9 @@ int main()
         serverAddr.sin_family = AF_INET;
         serverAddr.sin_port = htons(PORT);           
         inet_pton(AF_INET, sIP, &serverAddr.sin_addr); 
+        int opt = 1;
+        setsockopt(clientSocket, SOL_SOCKET,SO_REUSEADDR, 
+                    (const void *)&opt, sizeof(opt) ); //bind 端口复用
 
         if (connect(clientSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
         {
@@ -170,8 +201,8 @@ int main()
         }
         printf("socket Connected to server\n");
 
-        pSSL = useSessionTicket(pCtx);
-        // pSSL = SSL_new(pCtx);
+        // pSSL = useSessionTicket(pCtx);
+        pSSL = SSL_new(pCtx);
         if (NULL == pSSL)
         {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
@@ -193,7 +224,7 @@ int main()
                    ERR_error_string(ERR_get_error(), NULL));
             break;
         }
-        pX509Cert = SSL_get_peer_certificate(pSSL);
+        pX509Cert = SSL_get1_peer_certificate(pSSL);
 
         if (NULL == pX509Cert)
         {
@@ -215,10 +246,9 @@ int main()
         printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif
 
-        if(SSL_session_reused(pSSL))
+        if(SSL_session_reused(pSSL)){
             printf("sess reuse success\n");
-        else
-            printf("saving sess ticket\n");saveSessionTicket(pSSL);
+        }
         printf("Type 'quit' to exit\n");
 
         while (1)
@@ -239,6 +269,10 @@ int main()
             // recv(clientSocket, buffer, BUFSZ, 0);
             SSL_read(pSSL, buffer, BUFSZ);
             printf("Server response: %s\n", buffer);
+        }
+        if(!SSL_session_reused(pSSL)){
+            printf("saving sess ticket\n");
+            saveSessionTicket(pSSL);
         }
         SSL_shutdown(pSSL);
 

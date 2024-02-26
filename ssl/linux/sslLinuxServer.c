@@ -27,18 +27,26 @@
 
 const char* const certificate_path = "../ca/server.crt";
 const char* const private_key_path = "../ca/server.key";
-// const char* const password = "123456";
 
+void Keylog_cb_func(const SSL *ssl, const char *line){
+    FILE  * fp;
+    fp = fopen("/home/rio/Documents/huawei/code/server/proxy2-transmit/ssl/linux/openssl.log", "a");
+    if (fp == NULL)
+    {
+        printf("Failed to create log file\n");
+    }
+    fprintf(fp, "%s\n", line);
+    fclose(fp);
+}
 int main() {
     SSL_library_init();
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD* pMethod = TLSv1_2_method();
+    const SSL_METHOD* pMethod = TLS_method();
     SSL_CTX* pCtx = NULL;
     SSL* pSSL = NULL;
     int iRet = 0;
-
     //socket
     int serverSocket, clientSocket;
     int bytesRead = 0;
@@ -74,12 +82,18 @@ int main() {
             break;
         }
         SSL_CTX_set_timeout(pCtx, 600);
-        SSL_CTX_set_verify(pCtx, SSL_VERIFY_NONE, NULL);
-        SSL_CTX_set_options(pCtx, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-        SSL_CTX_set_session_cache_mode(pCtx, SSL_SESS_CACHE_OFF);
-        SSL_CTX_set_cipher_list(pCtx, "ECDHE-RSA-AES128-GCM-SHA256");
+        // SSL_CTX_set_max_proto_version(pCtx,TLS1_2_VERSION);
+        // SSL_CTX_set_min_proto_version(pCtx,TLS1_2_VERSION);
+        SSL_CTX_set_block_padding(pCtx,5);
+        // SSL_CTX_set_verify(pCtx, SSL_VERIFY_NONE, NULL);
+        // SSL_CTX_set_options(pCtx, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_2);
+        // SSL_CTX_set_session_cache_mode(pCtx, SSL_SESS_CACHE_OFF);
+        // SSL_CTX_set_cipher_list(pCtx, "ECDHE-RSA-AES128-GCM-SHA256");
+        // SSL_CTX_set_ciphersuites(pCtx,"TLS_AES_128_GCM_SHA256");
         // SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
+        // SSL_CTX_add_server_custom_ext(pCtx, TLSEXT_TYPE_signed_certificate_timestamp, NULL, NULL, NULL, NULL, NULL);
         SSL_CTX_set_mode(pCtx, SSL_MODE_AUTO_RETRY);
+        SSL_CTX_set_keylog_callback(pCtx,Keylog_cb_func);
 
         //socket
         serverSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -90,6 +104,9 @@ int main() {
         serverAddr.sin_family = AF_INET;
         serverAddr.sin_addr.s_addr = INADDR_ANY;
         serverAddr.sin_port = htons(PORT); 
+        int opt = 1;
+        setsockopt(serverSocket, SOL_SOCKET,SO_REUSEADDR, 
+                    (const void *)&opt, sizeof(opt) ); //bind 端口复用
 
         if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
             printf("%s %d Binding error=%d\n", __func__, __LINE__, errno);
