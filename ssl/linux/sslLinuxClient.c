@@ -19,14 +19,16 @@
 
 #define BACKLOG (5)
 #define BUFSZ (65536)
-#define PORT (4324)
+#define PORT (4322)
 #define VIRIFY_SERVER_CA (1)
+#define USE_EARLY_DATA (0)
 const char *const sIP = "127.0.0.1";
 // const char* const sIP = "192.168.137.1";
 const char *const pCAPath = "../ca/ca.crt";
 
-void Keylog_cb_func(const SSL *ssl, const char *line){
-    FILE  * fp;
+void Keylog_cb_func(const SSL *ssl, const char *line)
+{
+    FILE *fp;
     fp = fopen("/home/rio/Documents/huawei/code/server/proxy2-transmit/ssl/linux/openssl.log", "a");
     if (fp == NULL)
     {
@@ -48,24 +50,27 @@ void print_hex(const uint8_t *buf, size_t len)
     }
 }
 
-
-void saveSessionTicket(SSL *ssl) {
+void saveSessionTicket(SSL *ssl)
+{
     SSL_SESSION *session = SSL_get1_session(ssl);
-    if (session != NULL && SSL_SESSION_is_resumable(session)) {
-
+    if (session != NULL && SSL_SESSION_is_resumable(session))
+    {
         FILE *file = fopen("session_ticket.bin", "wb");
-        if (file) {
-            PEM_write_SSL_SESSION(file,session);
+        if (file)
+        {
+            PEM_write_SSL_SESSION(file, session);
             fclose(file);
         }
-    // SSL_SESSION_free(session);
-    }else{
+        // SSL_SESSION_free(session);
+    }
+    else
+    {
         printf("sess not resumable\n");
     }
+    SSL_SESSION_free(session);
 }
-
 // 读取Session Ticket文件并判断是否过期
-SSL *useSessionTicket(SSL_CTX *ctx)
+SSL *useSessionTicket(SSL_CTX *ctx, SSL_SESSION **session)
 {
     FILE *file = fopen("session_ticket.bin", "rb");
     SSL *ssl = SSL_new(ctx);
@@ -87,14 +92,14 @@ SSL *useSessionTicket(SSL_CTX *ctx)
     }
 
     // 将Session Ticket设置到SSL对象中
-    SSL_SESSION *session = PEM_read_SSL_SESSION(file, NULL, NULL, NULL);
+    *session = PEM_read_SSL_SESSION(file, NULL, NULL, NULL);
     fclose(file);
-    if (session)
+    if (*session)
     {
         // 判断Session Ticket是否过期
         time_t now = time(NULL);
-        time_t session_time = SSL_SESSION_get_time(session);
-        time_t session_timeout = SSL_SESSION_get_timeout(session);
+        time_t session_time = SSL_SESSION_get_time(*session);
+        time_t session_timeout = SSL_SESSION_get_timeout(*session);
         // 将过期时间格式化为可读的字符串
         time_t expiration_time = session_time + session_timeout;
         struct tm *expiration_tm = localtime(&expiration_time);
@@ -104,9 +109,9 @@ SSL *useSessionTicket(SSL_CTX *ctx)
         printf("Expiration Time: %s\n", timeBuff);
         // if (expiration_time> now)
         // {
-            // Session Ticket未过期，可以使用它进行握手
-            SSL_set_session(ssl, session);
-            return ssl;
+        // Session Ticket未过期，可以使用它进行握手
+        SSL_set_session(ssl, *session);
+        return ssl;
         // }
     }
 
@@ -120,9 +125,10 @@ int main()
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
-    const SSL_METHOD *pMethod = TLS_method();
+    const SSL_METHOD *pMethod = TLS_client_method();
     SSL_CTX *pCtx = NULL;
     SSL *pSSL = NULL;
+    SSL_SESSION *session = NULL;
 
     int iRet = -1;
     X509 *pX509Cert = NULL;
@@ -146,23 +152,22 @@ int main()
             break;
         }
         // EVP_PKEY_X25519
-        // SSL_CTX_set1_curves_list(pCtx, "secp256r1");
-        // SSL_CTX_set1_curves_list(pCtx, "X448");
-        // EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime_field);
-        // SSL_CTX_set_tmp_ecdh(pCtx, ecdh);
-        // EC_KEY_free(ecdh);
-        
+        // SSL_CTX_set1_curves_list(pCtx, "secp384r1");
+        SSL_CTX_set1_curves_list(pCtx, "X448");
+
         // SSL_CTX_set_options(pCtx, SSL_OP_NO_TLSv1_3);
         // SSL_CTX_set_options(pCtx, SSL_OP_NO_EXTENDED_MASTER_SECRET);//openssl 3.0
-        // SSL_CTX_set_options(pCtx, SSLOPEC);
-        SSL_CTX_set_block_padding(pCtx,3);
-        // SSL_CTX_set_ecdh_auto(pCtx, 1);
-        SSL_CTX_set_ciphersuites(pCtx,"TLS_AES_128_GCM_SHA256");
+        // SSL_CTX_set_block_padding(pCtx,3);
+        SSL_CTX_set_ciphersuites(pCtx, "TLS_AES_128_GCM_SHA256");
         // SSL_CTX_set_cipher_list(pCtx, "ECDHE-RSA-AES128-GCM-SHA256");
         // SSL_CTX_set_cipher_list(pCtx, "AES128-SHA256");
-        // SSL_CTX_add_client_custom_ext(pCtx, TLSEXT_TYPE_signed_certificate_timestamp, NULL, NULL, NULL, NULL, NULL);
-        
+        SSL_CTX_set1_sigalgs_list(pCtx,
+                                  "rsa_pss_rsae_sha384");
+        // SSL_CTX_add_client_custom_ext(pCtx, TLSEXT_TYPE_signed_certificate_timestamp, NULL, NULL,
+        // NULL, NULL, NULL);
+
         // SSL_CTX_set_keylog_callback(pCtx,Keylog_cb_func);
+        // SSL_CTX_set_max_early_data(pCtx, 10);
 #if VIRIFY_SERVER_CA
         if (SSL_CTX_load_verify_locations(pCtx, pCAPath, NULL) != 1)
         {
@@ -170,14 +175,6 @@ int main()
             break;
         }
         SSL_CTX_set_verify(pCtx, SSL_VERIFY_PEER, NULL);
-#endif
-#if 0
-        if (!SSL_CTX_set_cipher_list(pCtx, "ALL"))
-        {
-            printf("%s %d error=%d\n", __func__, __LINE__, errno);
-            break;
-
-        }
 #endif
 
         clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -188,11 +185,11 @@ int main()
         }
 
         serverAddr.sin_family = AF_INET;
-        serverAddr.sin_port = htons(PORT);           
-        inet_pton(AF_INET, sIP, &serverAddr.sin_addr); 
+        serverAddr.sin_port = htons(PORT);
+        inet_pton(AF_INET, sIP, &serverAddr.sin_addr);
         int opt = 1;
-        setsockopt(clientSocket, SOL_SOCKET,SO_REUSEADDR, 
-                    (const void *)&opt, sizeof(opt) ); //bind 端口复用
+        setsockopt(clientSocket, SOL_SOCKET, SO_REUSEADDR, (const void *)&opt,
+                   sizeof(opt)); // bind 端口复用
 
         if (connect(clientSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
         {
@@ -201,8 +198,8 @@ int main()
         }
         printf("socket Connected to server\n");
 
-        // pSSL = useSessionTicket(pCtx);
-        pSSL = SSL_new(pCtx);
+        pSSL = useSessionTicket(pCtx, &session);
+        // pSSL = SSL_new(pCtx);
         if (NULL == pSSL)
         {
             printf("%s %d error=%d\n", __func__, __LINE__, errno);
@@ -210,6 +207,46 @@ int main()
         }
         SSL_set_fd(pSSL, clientSocket);
 
+#if USE_EARLY_DATA
+        // SSL_SESSION *session = SSL_get1_session(pSSL);
+        if (session)
+        {
+            uint32_t maxEarly = SSL_SESSION_get_max_early_data(session);
+            size_t written = 10;
+            if (maxEarly > 0)
+            {
+                printf("max early: %d\n", maxEarly);
+                while (1)
+                {
+                    memset(buffer, '\0', BUFSZ);
+                    printf("Enter early data: ");
+                    fgets(buffer, BUFSZ, stdin);
+                    if (strncmp(buffer, "q", 1) == 0)
+                    {
+                        printf("Quitting...\n");
+                        break;
+                    }
+                    while (!SSL_write_early_data(pSSL, buffer, strlen(buffer), &written))
+                    // while (!SSL_write_early_data(pSSL, "ed test 1", 10, &written))
+                    {
+                        switch (SSL_get_error(pSSL, 0))
+                        {
+                            case SSL_ERROR_WANT_WRITE:
+                            case SSL_ERROR_WANT_ASYNC:
+                            case SSL_ERROR_WANT_READ:
+                                /* Just keep trying - busy waiting */
+                                continue;
+                            default: printf("Error writing early data\n"); goto earlyDone;
+                        }
+
+                    }
+                    // SSL_read(pSSL, buffer, BUFSZ);
+                    // printf("Server response: %s\n", buffer);
+                }
+            }
+        }
+    earlyDone:
+#endif
         iRet = SSL_connect(pSSL);
         if (iRet < 0)
         {
@@ -246,8 +283,17 @@ int main()
         printf("szSubject =%s \nszIssuer =%s\n  commonName =%s\n", szSubject, szIssuer, szBuf);
 #endif
 
-        if(SSL_session_reused(pSSL)){
-            printf("sess reuse success\n");
+        if (SSL_session_reused(pSSL))
+        {
+            printf("sess reuse successed\n");
+        }else{
+            printf("sess reuse failed\n");
+        }
+        switch (SSL_get_early_data_status(pSSL))
+        {
+            case (SSL_EARLY_DATA_ACCEPTED): printf("EARLY_DATA_ACCEPTED\n"); break;
+            case (SSL_EARLY_DATA_REJECTED): printf("EARLY_DATA_REJECTED\n"); break;
+            case (SSL_EARLY_DATA_NOT_SENT): printf("EARLY_DATA_NOT_SENT\n"); break;
         }
         printf("Type 'quit' to exit\n");
 
@@ -270,10 +316,9 @@ int main()
             SSL_read(pSSL, buffer, BUFSZ);
             printf("Server response: %s\n", buffer);
         }
-        if(!SSL_session_reused(pSSL)){
-            printf("saving sess ticket\n");
-            saveSessionTicket(pSSL);
-        }
+        // if (!SSL_session_reused(pSSL))
+        printf("saving sess ticket\n");
+        saveSessionTicket(pSSL);
         SSL_shutdown(pSSL);
 
     } while (0);
